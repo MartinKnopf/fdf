@@ -123,12 +123,23 @@ impl App {
             return Ok(());
         }
 
-        if self.selected_file_idx == 0 {
-            self.selected_file_idx = self.files.len() - 1;
-        } else {
-            self.selected_file_idx -= 1;
+        let file_indices: Vec<usize> = self.tree_rows.iter().filter_map(|r| r.file_index).collect();
+
+        if file_indices.is_empty() {
+            return Ok(());
         }
 
+        let current_pos = file_indices
+            .iter()
+            .position(|&idx| idx == self.selected_file_idx);
+
+        let new_pos = match current_pos {
+            Some(0) => file_indices.len() - 1,
+            Some(pos) => pos - 1,
+            None => file_indices.len() - 1,
+        };
+
+        self.selected_file_idx = file_indices[new_pos];
         self.reset_scroll();
         self.ensure_selected_loaded()
     }
@@ -138,7 +149,22 @@ impl App {
             return Ok(());
         }
 
-        self.selected_file_idx = (self.selected_file_idx + 1) % self.files.len();
+        let file_indices: Vec<usize> = self.tree_rows.iter().filter_map(|r| r.file_index).collect();
+
+        if file_indices.is_empty() {
+            return Ok(());
+        }
+
+        let current_pos = file_indices
+            .iter()
+            .position(|&idx| idx == self.selected_file_idx);
+
+        let new_pos = match current_pos {
+            Some(pos) => (pos + 1) % file_indices.len(),
+            None => 0,
+        };
+
+        self.selected_file_idx = file_indices[new_pos];
         self.reset_scroll();
         self.ensure_selected_loaded()
     }
