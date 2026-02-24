@@ -1,0 +1,66 @@
+files:
+  'Cargo.toml':
+    comment: 'Added serde and serde_yaml for YAML comment file parsing'
+    lines:
+      12: 'serde with derive feature for automatic deserialization of the YAML comment structure'
+      13: 'serde_yaml parses the comments YAML file into CommentsFile / FileCommentEntry structs'
+
+  'src/app.rs':
+    comment: 'Core state management — DisplayCache, comment toggle, and display row expansion'
+    lines:
+      5: 'New import for the comments module types used by DisplayCache and the public API'
+      12: 'DisplayCache lives on App (not on ChangedFile) so the expanded rows and the rows used for rendering are always the same object — eliminates stale-data bugs'
+      15: 'Struct holds the cache key (file_idx, aligned_ptr, aligned_len, wrap_width) together with the computed output (display_rows, comment_rows)'
+      29: 'Flag toggled by the c key — when true, render uses the 3-column layout and display_rows from the cache'
+      30: 'Holds the parsed Comments loaded from the YAML file at startup'
+      31: 'The current comment pane inner width, set each frame by the UI so wrapping matches the actual terminal size'
+      40: 'The display cache field — Option so it can be None when no file is selected or aligned_rows not yet computed'
+      44: 'App::new now accepts a Comments parameter from main'
+      54: 'Start with comments hidden; user presses c to reveal'
+      56: 'Wrap width starts at 0; set to real value on first render frame with comments visible'
+      65: 'Cache starts empty; built on demand by ensure_display_cache'
+      97: 'ToggleComments action — only toggles if comments were actually loaded (non-empty)'
+      139: 'When comments are shown, rows come from the DisplayCache which has padding inserted for wrapped comments. Otherwise fall back to raw aligned_rows.'
+      146: 'Accessor for the UI to retrieve comment text rows parallel to display_rows'
+      157: 'Called by UI each frame; stores the width and rebuilds the cache if any input changed'
+      164: 'Cache validation: checks file index, aligned_rows pointer and length, and wrap width. Any mismatch triggers a fresh expand_rows_with_comments call.'
+      190: 'Looks up FileComments by path — returns None for files with no YAML entry, which makes expand_rows_with_comments return rows unchanged'
+      191: 'expand_rows_with_comments produces both vecs in one pass, so display_rows and comment_rows are always perfectly parallel'
+      290: 'Invalidate cache on refresh so the next render recomputes with new aligned_rows'
+
+  'src/input.rs':
+    comment: 'Added ToggleComments action and c keybinding'
+    lines:
+      21: 'New action variant for toggling the comments panel'
+      41: 'Maps the c key to ToggleComments — lowercase to match the other toggle (b for tree)'
+
+  'src/main.rs':
+    comment: 'CLI argument parsing and comments module wiring'
+    lines:
+      2: 'Declare the new comments module'
+      11: 'PathBuf import needed for the comments file path argument'
+      24: 'Import Comments type so we can pass it to App::new'
+      28: 'Parse CLI args before doing anything else — extracts the optional -c/--comments path'
+      30: 'Load comments from YAML if -c was provided, otherwise use an empty Comments (no-op)'
+      36: 'Pass the loaded comments into App::new'
+      53: 'Simple hand-rolled arg parser — iterates over args, matches -c/--comments flag, bails on unknown args'
+      60: 'Consumes the next arg as the YAML file path; errors if missing'
+
+  'src/ui.rs':
+    comment: 'Three-column layout, comment pane width handoff, and comment row rendering'
+    lines:
+      15: 'Import CommentRow for the build_visible_comment_rows function'
+      38: 'Pre-compute the comment pane width before any rendering so App can word-wrap comments to fit the actual terminal width'
+      40: 'Duplicate the tree/diff split just to measure the comment pane area — the same layout is used again in render_diff'
+      59: 'Inner content width subtracts 2 for the block borders'
+      60: 'Hands the width to App which triggers ensure_display_cache if width changed'
+      123: 'When comments are visible, split the diff area into thirds (HEAD, WORKTREE, Comments) plus a 1-char scrollbar column'
+      134: 'Without comments, use the original 50/50 split with a zero-width placeholder so the index arithmetic stays consistent'
+      154: 'Use app.selected_rows() which returns display_rows (with padding) when comments are shown'
+      155: 'Only fetch comment_rows when the comments panel is actually visible'
+      169: 'Build the left and right diff lines from the (possibly expanded) rows'
+      177: 'Build comment lines from the parallel comment_rows vec, sliced by the same v_scroll'
+      220: 'Render the comments panel with a file-level comment in the title bar if one exists'
+      237: 'Scrollbar now renders in the 4th layout slot (index 3) instead of index 2'
+      285: 'Builds visible comment lines for the viewport — iterates the same v_scroll..end_idx range as build_visible_rows so rows stay vertically aligned'
+      292: 'Comment text styled in a muted yellow to distinguish from code'

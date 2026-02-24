@@ -1,4 +1,4 @@
-Last Updated: 2026-02-20
+Last Updated: 2026-02-23
 Status: active
 Audience: both
 Update Trigger: Layering changes, new invariants, enforcement changes
@@ -7,14 +7,16 @@ Source of Truth: src/, docs/10-architecture-overview.md, docs/30-quality-gates.m
 # Boundaries and Invariants
 
 ## Layer Boundaries
-- Allowed: `main` -> `app`, `ui`, `input`, `git`
-- Allowed: `app` -> `git`, `diff`, `tree`, `model`, `input`
-- Allowed: `ui` -> `app`, `model`
+- Allowed: `main` -> `app`, `ui`, `input`, `git`, `comments`
+- Allowed: `app` -> `git`, `diff`, `tree`, `model`, `input`, `comments`
+- Allowed: `ui` -> `app`, `model`, `comments`
+- Allowed: `comments` -> `model`
 - Allowed: `tree` -> `model`
 - Allowed: `diff` -> `model`
 - Allowed: `git` -> `model`
 - Forbidden: `model` importing `ui`, `app`, or `git`
 - Forbidden: `ui` invoking git subprocesses or filesystem scanning
+- Forbidden: `comments` importing `ui`, `app`, or `git`
 
 ## Invariants
 1. Invariant: The tool does not mutate git state.

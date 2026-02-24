@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
+use crate::comments::{self, Comments};
 use crate::diff::align_full_file;
 use crate::git;
 use crate::input::Action;
@@ -13,6 +14,9 @@ pub struct App {
     pub files: Vec<ChangedFile>,
     pub tree_rows: Vec<TreeRow>,
     pub show_tree: bool,
+    pub show_comments: bool,
+    pub comments: Comments,
+    pub comment_wrap_width: usize,
     pub tree_h_scroll: usize,
     pub selected_file_idx: usize,
     pub v_scroll: usize,
@@ -24,7 +28,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(repo_root: PathBuf) -> Result<Self> {
+    pub fn new(repo_root: PathBuf, comments: Comments) -> Result<Self> {
         let files = git::collect_changed_files(&repo_root)?;
         let tree = tree::build_tree(&files);
         let tree_rows = tree::flatten_tree(&tree, &files);
@@ -34,6 +38,9 @@ impl App {
             files,
             tree_rows,
             show_tree: true,
+            show_comments: false,
+            comments,
+            comment_wrap_width: 0,
             tree_h_scroll: 0,
             selected_file_idx: 0,
             v_scroll: 0,
@@ -73,6 +80,11 @@ impl App {
             Action::ToggleTree => {
                 self.show_tree = !self.show_tree;
             }
+            Action::ToggleComments => {
+                if !self.comments.is_empty() {
+                    self.show_comments = !self.show_comments;
+                }
+            }
             Action::Refresh => self.refresh()?,
             Action::TreeScrollLeft => {
                 self.tree_h_scroll = self.tree_h_scroll.saturating_sub(1);
@@ -110,12 +122,57 @@ impl App {
     }
 
     pub fn selected_rows(&self) -> Option<&Vec<AlignedRow>> {
-        self.selected_file().and_then(|f| f.aligned_rows.as_ref())
+        self.selected_file().and_then(|f| {
+            if self.show_comments {
+                f.display_rows.as_ref()
+            } else {
+                f.aligned_rows.as_ref()
+            }
+        })
+    }
+
+    pub fn selected_comment_rows(&self) -> Option<&Vec<comments::CommentRow>> {
+        self.selected_file().and_then(|f| f.comment_rows.as_ref())
     }
 
     pub fn set_viewport_rows(&mut self, rows: usize) {
         self.viewport_rows = rows.max(1);
         self.clamp_scroll();
+    }
+
+    /// Called by UI each frame to communicate the comment pane content width.
+    /// Ensures the selected file's display cache is up-to-date.
+    pub fn set_comment_pane_width(&mut self, width: usize) {
+        self.comment_wrap_width = width;
+        self.ensure_display_rows();
+    }
+
+    /// Ensure display_rows / comment_rows are computed for the selected file
+    /// at the current wrap width. Recomputes only when the wrap width changed
+    /// or the cache is empty, so switching back to a previously viewed file is
+    /// effectively free and the highlight cache still hits (stable pointer).
+    fn ensure_display_rows(&mut self) {
+        let idx = self.selected_file_idx;
+        let wrap = self.comment_wrap_width;
+        let Some(file) = self.files.get_mut(idx) else {
+            return;
+        };
+
+        // Already computed at this width — nothing to do.
+        if file.display_rows.is_some() && file.display_wrap_width == wrap {
+            return;
+        }
+
+        let Some(ref aligned) = file.aligned_rows else {
+            return;
+        };
+
+        let file_comments = self.comments.for_file(&file.path);
+        let (display, crows) = comments::expand_rows_with_comments(aligned, file_comments, wrap);
+
+        file.display_rows = Some(display);
+        file.comment_rows = Some(crows);
+        file.display_wrap_width = wrap;
     }
 
     fn select_prev_file(&mut self) -> Result<()> {
@@ -139,7 +196,11 @@ impl App {
             None => file_indices.len() - 1,
         };
 
-        self.selected_file_idx = file_indices[new_pos];
+        let new_idx = file_indices[new_pos];
+        if new_idx == self.selected_file_idx {
+            return Ok(());
+        }
+        self.selected_file_idx = new_idx;
         self.reset_scroll();
         self.ensure_selected_loaded()
     }
@@ -164,7 +225,11 @@ impl App {
             None => 0,
         };
 
-        self.selected_file_idx = file_indices[new_pos];
+        let new_idx = file_indices[new_pos];
+        if new_idx == self.selected_file_idx {
+            return Ok(());
+        }
+        self.selected_file_idx = new_idx;
         self.reset_scroll();
         self.ensure_selected_loaded()
     }
@@ -344,6 +409,9 @@ mod tests {
             files: Vec::new(),
             tree_rows: Vec::new(),
             show_tree: true,
+            show_comments: false,
+            comments: crate::comments::Comments::default(),
+            comment_wrap_width: 0,
             tree_h_scroll: 0,
             selected_file_idx: 0,
             v_scroll: 0,

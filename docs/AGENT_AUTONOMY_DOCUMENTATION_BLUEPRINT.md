@@ -1233,10 +1233,6 @@ Escalate to a human owner if:
 - Security/privacy interpretation is unclear.
 - Required quality gates fail repeatedly without clear cause.
 
-### Ownership policy
-- Every doc has exactly one accountable owner.
-- Ownership changes are documented in `docs/80-change-log.md`.
-
 ## 7) Agent Execution Playbook (Docs-Only)
 Use this sequence for every task:
 

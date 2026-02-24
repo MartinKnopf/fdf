@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::comments::CommentRow;
+
 #[derive(Debug, Clone, Default)]
 pub struct FileStatus {
     pub staged: bool,
@@ -26,6 +28,14 @@ pub struct ChangedFile {
     pub old_content: Option<ContentData>,
     pub new_content: Option<ContentData>,
     pub aligned_rows: Option<Vec<AlignedRow>>,
+    /// Aligned rows expanded with padding for multiline comments.
+    /// Cached together with the wrap width used to produce them.
+    pub display_rows: Option<Vec<AlignedRow>>,
+    /// Comment text lines parallel to `display_rows`.
+    pub comment_rows: Option<Vec<CommentRow>>,
+    /// The wrap width that was used to compute `display_rows` / `comment_rows`.
+    /// When the pane width changes this lets us detect staleness.
+    pub display_wrap_width: usize,
 }
 
 impl ChangedFile {
@@ -36,6 +46,9 @@ impl ChangedFile {
             old_content: None,
             new_content: None,
             aligned_rows: None,
+            display_rows: None,
+            comment_rows: None,
+            display_wrap_width: 0,
         }
     }
 }

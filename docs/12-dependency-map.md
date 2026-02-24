@@ -1,4 +1,4 @@
-Last Updated: 2026-02-20
+Last Updated: 2026-02-23
 Status: active
 Audience: both
 Update Trigger: Dependency addition/removal/upgrade policy change
@@ -7,14 +7,15 @@ Source of Truth: Cargo.toml, Cargo.lock, src/
 # Dependency Map
 
 ## Internal Dependencies
-- `src/main.rs`: depends on `app`, `git`, `input`, `ui`.
-- `src/app.rs`: depends on `diff`, `git`, `input`, `model`, `tree`.
-- `src/ui.rs`: depends on `app`, `model`.
+- `src/main.rs`: depends on `app`, `comments`, `git`, `input`, `ui`.
+- `src/app.rs`: depends on `comments`, `diff`, `git`, `input`, `model`, `tree`.
+- `src/ui.rs`: depends on `app`, `comments`, `model`.
+- `src/comments.rs`: depends on `model`.
 - `src/tree.rs`: depends on `model`.
 - `src/diff.rs`: depends on `model`.
 - `src/git.rs`: depends on `model`.
 - `src/input.rs`: standalone action mapping.
-- `src/model.rs`: foundational types; should not depend on other internal modules.
+- `src/model.rs`: foundational types; depends on `comments` only for `CommentRow` type.
 
 ## External Dependencies
 - `ratatui`
@@ -37,6 +38,16 @@ Source of Truth: Cargo.toml, Cargo.lock, src/
   - Criticality: medium
   - Upgrade Policy: review minor updates quarterly; prioritize parser/theme bugfixes.
   - Breaking Change Plan: keep adaptation confined to `src/ui.rs`.
+- `serde`
+  - Purpose: derive-based deserialization for YAML comment file structures.
+  - Criticality: low
+  - Upgrade Policy: patch/minor updates as available.
+  - Breaking Change Plan: keep adaptation confined to `src/comments.rs`.
+- `serde_yaml`
+  - Purpose: YAML parsing for the comments file.
+  - Criticality: low
+  - Upgrade Policy: patch/minor updates as available.
+  - Breaking Change Plan: keep adaptation confined to `src/comments.rs`.
 - `anyhow`
   - Purpose: ergonomic error propagation/context.
   - Criticality: medium
@@ -45,5 +56,6 @@ Source of Truth: Cargo.toml, Cargo.lock, src/
 
 ## Forbidden Dependency Patterns
 - Domain model (`src/model.rs`) depending on rendering or input crates.
+- Comments module (`src/comments.rs`) depending on rendering, input, or git crates.
 - UI layer (`src/ui.rs`) reading git state or filesystem directly.
 - Adding async runtime dependencies without documented need and ADR.

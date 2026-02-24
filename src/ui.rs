@@ -12,6 +12,7 @@ use syntect::highlighting::{FontStyle, Style as SyntectStyle, Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 use crate::app::App;
+use crate::comments::CommentRow;
 use crate::model::{AlignedRow, RowKind};
 
 #[derive(Debug)]
@@ -33,7 +34,32 @@ thread_local! {
     static HIGHLIGHT_CACHE: RefCell<Option<FileHighlightCache>> = const { RefCell::new(None) };
 }
 
-pub fn render(frame: &mut Frame<'_>, app: &App) {
+pub fn render(frame: &mut Frame<'_>, app: &mut App) {
+    // Compute comment pane width so App can wrap comments to fit.
+    if app.show_comments {
+        let diff_area = if app.show_tree {
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(28), Constraint::Percentage(72)])
+                .split(frame.area());
+            chunks[1]
+        } else {
+            frame.area()
+        };
+        let comment_pane = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Length(1),
+            ])
+            .split(diff_area);
+        // Inner content width = pane width minus 2 for borders.
+        let content_width = comment_pane[2].width.saturating_sub(2) as usize;
+        app.set_comment_pane_width(content_width);
+    }
+
     if app.show_tree {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -94,14 +120,27 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let right_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-            Constraint::Length(1),
-        ])
-        .split(area);
+    let right_chunks = if app.show_comments {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Length(1),
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+                Constraint::Length(0),
+                Constraint::Length(1),
+            ])
+            .split(area)
+    };
 
     let selected_file = app.selected_file();
     let title = selected_file
@@ -112,34 +151,54 @@ fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|file| syntax_for_path(&file.path, syntax_set()))
         .unwrap_or_else(|| syntax_set().find_syntax_plain_text());
 
-    let (left_lines, right_lines) = if let Some(file) = selected_file {
-        if let Some(rows) = file.aligned_rows.as_ref() {
+    let rows_to_render = app.selected_rows();
+    let comment_rows = if app.show_comments {
+        app.selected_comment_rows()
+    } else {
+        None
+    };
+
+    let (left_lines, right_lines, comment_lines) = if let Some(file) = selected_file {
+        if let Some(rows) = rows_to_render {
             with_highlighted_rows_for_file(
                 &file.path,
                 rows,
                 syntax,
                 app.highlight_epoch,
                 |highlighted_rows| {
-                    build_visible_rows(
+                    let (l, r) = build_visible_rows(
                         rows,
                         highlighted_rows,
                         app.v_scroll,
                         app.h_scroll,
                         right_chunks[0].width as usize,
                         right_chunks[0].height as usize,
-                    )
+                    );
+                    let c = if app.show_comments {
+                        build_visible_comment_rows(
+                            comment_rows,
+                            app.v_scroll,
+                            right_chunks[2].width as usize,
+                            right_chunks[2].height as usize,
+                        )
+                    } else {
+                        Vec::new()
+                    };
+                    (l, r, c)
                 },
             )
         } else {
             (
                 vec![Line::from("No changed files")],
                 vec![Line::from("No changed files")],
+                Vec::new(),
             )
         }
     } else {
         (
             vec![Line::from("No changed files")],
             vec![Line::from("No changed files")],
+            Vec::new(),
         )
     };
 
@@ -158,10 +217,25 @@ fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(left, right_chunks[0]);
     frame.render_widget(right, right_chunks[1]);
 
+    if app.show_comments {
+        let file_comment_title = selected_file
+            .and_then(|f| app.comments.for_file(&f.path))
+            .and_then(|fc| fc.comment.as_deref())
+            .unwrap_or("");
+        let title = if file_comment_title.is_empty() {
+            "Comments".to_string()
+        } else {
+            format!("Comments | {}", file_comment_title)
+        };
+        let comments_widget = Paragraph::new(comment_lines)
+            .block(Block::default().title(title).borders(Borders::ALL));
+        frame.render_widget(comments_widget, right_chunks[2]);
+    }
+
     render_scrollbar(
         frame,
-        right_chunks[2],
-        app.selected_rows().map(|rows| rows.as_slice()),
+        right_chunks[3],
+        rows_to_render.map(|rows| rows.as_slice()),
         app.v_scroll,
         app.viewport_rows,
     );
@@ -206,6 +280,35 @@ fn build_visible_rows(
     }
 
     (left, right)
+}
+
+fn build_visible_comment_rows(
+    comment_rows: Option<&Vec<CommentRow>>,
+    v_scroll: usize,
+    _pane_width: usize,
+    pane_height: usize,
+) -> Vec<Line<'static>> {
+    let viewport_height = pane_height.saturating_sub(2).max(1);
+    let comment_style = Style::default().fg(Color::Rgb(180, 180, 140));
+
+    let Some(rows) = comment_rows else {
+        return vec![Line::from(""); viewport_height];
+    };
+
+    let max_visible = rows.len().saturating_sub(v_scroll).min(viewport_height);
+    let end_idx = (v_scroll + max_visible).min(rows.len());
+    let mut lines = Vec::with_capacity(max_visible);
+
+    for idx in v_scroll..end_idx {
+        let text = &rows[idx].text;
+        if text.is_empty() {
+            lines.push(Line::from(""));
+        } else {
+            lines.push(Line::from(Span::styled(text.clone(), comment_style)));
+        }
+    }
+
+    lines
 }
 
 fn styled_diff_line(

@@ -1,10 +1,12 @@
-Last Updated: 2026-02-20
+Last Updated: 2026-02-24
 Status: active
 Audience: both
 Update Trigger: Process change, architecture change, quality gate change
 Source of Truth: docs/00-index.md, docs/11-boundaries-and-invariants.md, docs/30-quality-gates.md
 
 # Agent Operating Guide
+
+ALWAYS KEEP THE DOCUMENTATION UP-TO-DATE. If you make changes, check which docs need to be updated.
 
 ## Mission
 Deliver safe, correct, and maintainable improvements to `fdf`, a read-only terminal git diff viewer, while preserving keyboard-driven UX and architecture boundaries.

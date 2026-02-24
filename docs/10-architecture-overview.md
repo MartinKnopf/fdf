@@ -1,8 +1,8 @@
-Last Updated: 2026-02-21
+Last Updated: 2026-02-23
 Status: active
 Audience: both
 Update Trigger: Any module addition/removal in `src/`, any event loop/input model changes, or git backend changes.
-Source of Truth: `src/main.rs`, `src/app.rs`, `src/ui.rs`, `src/git.rs`, `src/diff.rs`, `src/tree.rs`, `src/model.rs`, `src/input.rs`, `Cargo.toml`
+Source of Truth: `src/main.rs`, `src/app.rs`, `src/ui.rs`, `src/git.rs`, `src/diff.rs`, `src/tree.rs`, `src/model.rs`, `src/input.rs`, `src/comments.rs`, `Cargo.toml`
 
 # Architecture Overview
 
@@ -23,14 +23,15 @@ Source of Truth: `src/main.rs`, `src/app.rs`, `src/ui.rs`, `src/git.rs`, `src/di
 
 | Component | File(s) | Responsibility |
 |---|---|---|
-| Bootstrap and lifecycle | `src/main.rs` | Initialize repo + app state, set terminal raw mode/alternate screen, run event/render loop, restore terminal on exit. |
-| Application state machine | `src/app.rs` | Own all interactive state (`selected_file_idx`, scroll offsets, viewport size), dispatch actions, lazy-load file content and aligned rows, enforce scroll bounds. |
+| Bootstrap and lifecycle | `src/main.rs` | Initialize repo + app state, parse CLI args (`-h`, `-c`), set terminal raw mode/alternate screen, run event/render loop, restore terminal on exit. |
+| Application state machine | `src/app.rs` | Own all interactive state (`selected_file_idx`, scroll offsets, viewport size, comment visibility), dispatch actions, lazy-load file content and aligned rows, compute display rows with comment padding, enforce scroll bounds. |
 | Input translation | `src/input.rs` | Map raw `crossterm` key events to domain actions (`Action`). |
 | Git data adapter | `src/git.rs` | Discover repo root, parse changed files from `git status --porcelain=v2 -z`, load `HEAD` and worktree content. |
 | Tree builder | `src/tree.rs` | Build hierarchical path tree from changed files and flatten it into UI rows with status labels. |
 | Diff alignment engine | `src/diff.rs` | Convert full old/new file text into aligned side-by-side rows with line numbers and row kinds. |
-| UI rendering | `src/ui.rs` | Render tree pane, diff panes, syntax highlighting, and vertical scrollbar with change markers + viewport thumb. |
-| Domain model | `src/model.rs` | Shared structs/enums (`ChangedFile`, `FileStatus`, `AlignedRow`, `RowKind`, `TreeNode`, `TreeRow`). |
+| Comments | `src/comments.rs` | Parse YAML comments file, word-wrap comment text, expand aligned rows with padding rows for multiline comments. |
+| UI rendering | `src/ui.rs` | Render tree pane, diff panes, optional comments pane, syntax highlighting, and vertical scrollbar with change markers + viewport thumb. |
+| Domain model | `src/model.rs` | Shared structs/enums (`ChangedFile`, `FileStatus`, `AlignedRow`, `RowKind`, `TreeNode`, `TreeRow`, `CommentRow`). |
 
 ### External dependencies
 
@@ -40,6 +41,8 @@ Source of Truth: `src/main.rs`, `src/app.rs`, `src/ui.rs`, `src/git.rs`, `src/di
 | `crossterm` | `src/main.rs`, `src/input.rs` | Raw mode, alternate screen, key event polling. |
 | `similar` | `src/diff.rs` | Line-level diff ops used to produce aligned full-file rows. |
 | `syntect` | `src/ui.rs` | Language-aware syntax highlighting converted into terminal spans. |
+| `serde` | `src/comments.rs` | Derive-based deserialization for YAML comment file structures. |
+| `serde_yaml` | `src/comments.rs` | YAML parsing for the comments file. |
 | `anyhow` | most modules | Error propagation with context. |
 
 ## Request/Data Flow
@@ -47,8 +50,10 @@ Source of Truth: `src/main.rs`, `src/app.rs`, `src/ui.rs`, `src/git.rs`, `src/di
 
 ```text
 main()
+  -> parse_args()  (-h prints help and exits, -c <path> sets comments file)
+  -> comments::load_comments() if -c provided, else Comments::default()
   -> git::repo_root()
-  -> App::new()
+  -> App::new(repo_root, comments)
        -> git::collect_changed_files()
        -> tree::build_tree() + tree::flatten_tree()
        -> ensure_selected_loaded() for first file
@@ -58,6 +63,8 @@ main()
             -> diff::align_full_file()
   -> run loop:
        draw frame (ui::render)
+         -> if show_comments: set_comment_pane_width() -> ensure_display_rows()
+              -> comments::expand_rows_with_comments() (cached per-file + wrap width)
        poll key event
        map_key -> Action
        app.on_action(Action)
@@ -75,19 +82,24 @@ main()
    - file tree horizontal scrolling (`Shift+H`/`Shift+L`)
    - diff block navigation with wrap (`n` / `N`)
    - file tree visibility toggle (`b`)
+   - comments panel toggle (`c`)
    - quit (`q`)
-4. `ui::render()` reads immutable `App` state and re-renders:
+4. `ui::render()` reads `App` state and re-renders:
    - optional left file tree (`TreeRow` list)
-   - aligned rows window
+   - aligned rows window (or display rows with comment padding when comments visible)
+   - optional right comments pane (comment text parallel to display rows)
    - rightmost scrollbar (change markers + viewport thumb)
 
 ### Data ownership and caching
 - `App.files: Vec<ChangedFile>` is the canonical per-file data store.
+- `App.comments: Comments` holds parsed YAML annotations keyed by file path and line number.
 - Each `ChangedFile` lazily caches:
   - `old_content` (`HEAD`)
   - `new_content` (worktree)
   - `aligned_rows` (computed once per file selection lifecycle)
+  - `display_rows` / `comment_rows` (expanded aligned rows with comment padding, cached per wrap width via `display_wrap_width`)
 - Re-selecting a file reuses cached rows instead of recomputing.
+- Display rows are recomputed only when the comment pane width changes (terminal resize, tree toggle).
 
 ## Cross-Cutting Concerns
 ### Error handling and terminal safety
@@ -118,6 +130,8 @@ main()
 ## Placement Guidance for New Logic
 - New keyboard behavior: extend `Action` and `map_key` in `src/input.rs`, then handle in `App::on_action`.
 - New per-file derived view data: add field to `ChangedFile` in `src/model.rs`, compute in `App::ensure_selected_loaded`.
+- New annotation/comment logic: extend `src/comments.rs`; keep YAML schema and expansion logic there.
+- New CLI arguments: extend `parse_args()` in `src/main.rs`; update `print_help()`.
 - New git state source/parsing: isolate in `src/git.rs`; keep `App` unaware of raw git output format.
 - New UI widgets/panes: keep layout and rendering details in `src/ui.rs`; avoid business logic there.
 

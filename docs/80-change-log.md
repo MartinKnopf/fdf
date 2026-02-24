@@ -1,10 +1,31 @@
-Last Updated: 2026-02-21
+Last Updated: 2026-02-23
 Status: active
 Audience: both
 Update Trigger: Meaningful behavior/reliability/security/release change
 Source of Truth: PRs, release tags
 
 # Change Log
+
+## 2026-02-23
+- Change: File selection (`Shift+J`/`Shift+K`) wraps around at boundaries and short-circuits when selection is unchanged.
+- Impact: `K` at the first file jumps to the last file; `J` at the last file jumps to the first. Repeated presses at a boundary that would select the same file (single-file case) now return immediately without reloading.
+- References: src/app.rs
+
+## 2026-02-23
+- Change: Added `-h`/`--help` CLI flag with full usage, keybinding reference, and comments file schema documentation.
+- Impact: Running `fdf -h` prints help text and exits without entering the TUI.
+- References: src/main.rs
+
+## 2026-02-23
+- Change: Display row caching moved from single `DisplayCache` on `App` to per-file fields on `ChangedFile` with `display_wrap_width` staleness key.
+- Impact: Switching between previously viewed files no longer recomputes display rows or invalidates the syntax highlight cache, eliminating lag on file switches with comments enabled.
+- References: src/app.rs, src/model.rs
+
+## 2026-02-23
+- Change: Added comments feature — YAML-sourced annotations displayed alongside diffs.
+- Impact: A new `-c`/`--comments <path>` CLI argument loads a YAML file with per-file and per-line annotations. Press `c` to toggle a third panel (Comments) to the right of the WORKTREE pane. Comments are word-wrapped to fit the panel width; multiline comments insert padding rows in the diff panels to keep all three columns vertically aligned. New module `src/comments.rs` handles YAML parsing, word wrapping, and row expansion. New dependencies: `serde`, `serde_yaml`.
+- References: src/comments.rs, src/app.rs, src/input.rs, src/main.rs, src/model.rs, src/ui.rs, Cargo.toml, docs/10-architecture-overview.md, docs/11-boundaries-and-invariants.md, docs/12-dependency-map.md
+- Rollback Notes: Remove `src/comments.rs`, revert `src/app.rs`/`src/input.rs`/`src/main.rs`/`src/model.rs`/`src/ui.rs` changes, remove `serde`/`serde_yaml` from `Cargo.toml`.
 
 ## 2026-02-21
 - Change: Replaced arrow-key tree navigation with `Shift+H`/`Shift+J`/`Shift+K`/`Shift+L`.
