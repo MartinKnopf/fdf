@@ -102,6 +102,11 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let mut state = ListState::default();
     if let Some(selected) = selected_tree_row_idx(app) {
         state.select(Some(selected));
+        // Center the selected row in the visible area when possible.
+        let visible_height = area.height.saturating_sub(2) as usize; // minus borders
+        let half = visible_height / 2;
+        let offset = selected.saturating_sub(half);
+        *state.offset_mut() = offset;
     }
 
     let list = List::new(items)
