@@ -40,7 +40,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         let diff_area = if app.show_tree {
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(28), Constraint::Percentage(72)])
+                .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
                 .split(frame.area());
             chunks[1]
         } else {
@@ -63,7 +63,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
     if app.show_tree {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(28), Constraint::Percentage(72)])
+            .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
             .split(frame.area());
 
         render_tree(frame, app, chunks[0]);
