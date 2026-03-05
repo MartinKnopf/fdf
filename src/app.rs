@@ -351,7 +351,8 @@ impl App {
             return;
         }
 
-        if let Some(next) = starts.iter().copied().find(|idx| *idx > self.v_scroll) {
+        let center = self.v_scroll + self.viewport_rows / 2;
+        if let Some(next) = starts.iter().copied().find(|idx| *idx > center) {
             self.center_on_row(next);
         } else if let Some(first) = starts.first().copied() {
             self.center_on_row(first);
@@ -367,11 +368,12 @@ impl App {
             return;
         }
 
+        let center = self.v_scroll + self.viewport_rows / 2;
         if let Some(prev) = starts
             .iter()
             .copied()
             .rev()
-            .find(|idx| *idx < self.v_scroll)
+            .find(|idx| *idx < center)
         {
             self.center_on_row(prev);
         } else if let Some(last) = starts.last().copied() {
