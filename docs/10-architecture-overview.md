@@ -86,6 +86,7 @@ main()
    - quit (`q`)
 4. `ui::render()` reads `App` state and re-renders:
    - optional left file tree (`TreeRow` list)
+   - file tab bar above the diff panes (filename-only, bold for selected, `…` overflow)
    - aligned rows window (or display rows with comment padding when comments visible)
    - optional right comments pane (comment text parallel to display rows)
    - rightmost scrollbar (change markers + viewport thumb)

@@ -74,7 +74,8 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
 }
 
 pub fn viewport_rows(area: Rect) -> usize {
-    area.height.saturating_sub(2).max(1) as usize
+    // Subtract 2 for diff pane borders, 1 for tab bar row.
+    area.height.saturating_sub(3).max(1) as usize
 }
 
 fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -124,7 +125,89 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let available_width = area.width as usize;
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut used_width: usize = 0;
+    let mut all_fit = true;
+
+    for (idx, file) in app.files.iter().enumerate() {
+        let filename = file
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file.path.to_string_lossy().into_owned());
+
+        let is_selected = idx == app.selected_file_idx;
+        // Selected: "[name]", others: "name"; space separator between tabs
+        let label = if is_selected {
+            format!("[{}]", filename)
+        } else {
+            filename
+        };
+        let label_width = label.chars().count();
+        let sep_width = if idx == 0 { 0 } else { 1 }; // single space
+        let tab_width = sep_width + label_width;
+
+        // Check if this tab fits; if not, append ellipsis and stop
+        let remaining = available_width.saturating_sub(used_width);
+
+        if tab_width > remaining {
+            if remaining > 0 {
+                if idx > 0 && remaining >= 2 {
+                    spans.push(Span::styled(" ", Style::default()));
+                }
+                spans.push(Span::styled(
+                    "…".to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            all_fit = false;
+            break;
+        }
+
+        if idx > 0 {
+            spans.push(Span::styled(" ", Style::default()));
+        }
+
+        let style = if is_selected {
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::White)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+
+        spans.push(Span::styled(label, style));
+        used_width += tab_width;
+    }
+
+    // If all fit but there are no files, show nothing special
+    if app.files.is_empty() {
+        return;
+    }
+
+    let _ = all_fit; // suppress unused warning
+
+    let line = Line::from(spans);
+    let paragraph = Paragraph::new(line);
+    frame.render_widget(paragraph, area);
+}
+
 fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    // Split: 1 row for tab bar, rest for diff content
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    render_tab_bar(frame, app, vertical[0]);
+    let area = vertical[1];
+
     let right_chunks = if app.show_comments {
         Layout::default()
             .direction(Direction::Horizontal)

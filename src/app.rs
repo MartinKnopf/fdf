@@ -87,10 +87,18 @@ impl App {
             }
             Action::Refresh => self.refresh()?,
             Action::TreeScrollLeft => {
-                self.tree_h_scroll = self.tree_h_scroll.saturating_sub(1);
+                if self.show_tree {
+                    self.tree_h_scroll = self.tree_h_scroll.saturating_sub(1);
+                } else {
+                    self.select_prev_file()?;
+                }
             }
             Action::TreeScrollRight => {
-                self.tree_h_scroll = self.tree_h_scroll.saturating_add(1);
+                if self.show_tree {
+                    self.tree_h_scroll = self.tree_h_scroll.saturating_add(1);
+                } else {
+                    self.select_next_file()?;
+                }
             }
             Action::ScrollDown => {
                 self.v_scroll = self.v_scroll.saturating_add(1);
