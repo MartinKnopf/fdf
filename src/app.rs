@@ -337,6 +337,11 @@ impl App {
         self.v_scroll = self.max_v_scroll();
     }
 
+    fn center_on_row(&mut self, row: usize) {
+        let half = self.viewport_rows / 2;
+        self.v_scroll = row.saturating_sub(half).min(self.max_v_scroll());
+    }
+
     fn jump_next_change(&mut self) {
         let Some(rows) = self.selected_rows() else {
             return;
@@ -347,9 +352,9 @@ impl App {
         }
 
         if let Some(next) = starts.iter().copied().find(|idx| *idx > self.v_scroll) {
-            self.v_scroll = next;
+            self.center_on_row(next);
         } else if let Some(first) = starts.first().copied() {
-            self.v_scroll = first;
+            self.center_on_row(first);
         }
     }
 
@@ -368,9 +373,9 @@ impl App {
             .rev()
             .find(|idx| *idx < self.v_scroll)
         {
-            self.v_scroll = prev;
+            self.center_on_row(prev);
         } else if let Some(last) = starts.last().copied() {
-            self.v_scroll = last;
+            self.center_on_row(last);
         }
     }
 
