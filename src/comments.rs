@@ -234,6 +234,8 @@ pub fn expand_rows_with_comments(
                 left_text: String::new(),
                 right_text: String::new(),
                 kind: crate::model::RowKind::Equal,
+                left_changed_ranges: Vec::new(),
+                right_changed_ranges: Vec::new(),
             });
             comment_rows.push(CommentRow {
                 text: extra_line.to_string(),
@@ -284,6 +286,8 @@ files:
                 left_text: "old1".into(),
                 right_text: "new1".into(),
                 kind: RowKind::Changed,
+                left_changed_ranges: Vec::new(),
+                right_changed_ranges: Vec::new(),
             },
             AlignedRow {
                 left_line_no: Some(2),
@@ -291,6 +295,8 @@ files:
                 left_text: "same".into(),
                 right_text: "same".into(),
                 kind: RowKind::Equal,
+                left_changed_ranges: Vec::new(),
+                right_changed_ranges: Vec::new(),
             },
         ];
 
@@ -334,6 +340,8 @@ files:
             left_text: "x".into(),
             right_text: "x".into(),
             kind: RowKind::Equal,
+            left_changed_ranges: Vec::new(),
+            right_changed_ranges: Vec::new(),
         }];
 
         let (expanded, comments) = expand_rows_with_comments(&rows, None, 0);
@@ -374,6 +382,8 @@ files:
             left_text: "code".into(),
             right_text: "code".into(),
             kind: RowKind::Changed,
+            left_changed_ranges: Vec::new(),
+            right_changed_ranges: Vec::new(),
         }];
 
         let mut line_comments = HashMap::new();

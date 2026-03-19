@@ -74,6 +74,10 @@ pub struct AlignedRow {
     pub left_text: String,
     pub right_text: String,
     pub kind: RowKind,
+    /// Byte ranges within `left_text` that actually changed (only for RowKind::Changed).
+    pub left_changed_ranges: Vec<std::ops::Range<usize>>,
+    /// Byte ranges within `right_text` that actually changed (only for RowKind::Changed).
+    pub right_changed_ranges: Vec<std::ops::Range<usize>>,
 }
 
 #[derive(Debug, Clone)]

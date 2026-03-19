@@ -9,6 +9,11 @@ use crate::input::Action;
 use crate::model::{AlignedRow, ChangedFile, ContentData, TreeRow};
 use crate::tree;
 
+pub struct ShellCommand {
+    pub args: Vec<String>,
+    pub wait_for_key: bool,
+}
+
 pub struct App {
     pub repo_root: PathBuf,
     pub files: Vec<ChangedFile>,
@@ -25,6 +30,7 @@ pub struct App {
     pub highlight_epoch: u64,
     pub g_prefix_pending: bool,
     pub should_quit: bool,
+    pub shell_command: Option<ShellCommand>,
     pub use_difft: bool,
 }
 
@@ -52,6 +58,7 @@ impl App {
             highlight_epoch: 0,
             g_prefix_pending: false,
             should_quit: false,
+            shell_command: None,
             use_difft,
         };
 
@@ -91,6 +98,18 @@ impl App {
             }
             Action::Refresh => self.refresh()?,
             Action::ToggleStage => self.toggle_stage()?,
+            Action::GitCommit => {
+                self.shell_command = Some(ShellCommand {
+                    args: vec!["git".into(), "commit".into()],
+                    wait_for_key: false,
+                });
+            }
+            Action::GitPush => {
+                self.shell_command = Some(ShellCommand {
+                    args: vec!["git".into(), "push".into()],
+                    wait_for_key: true,
+                });
+            }
             Action::TreeScrollLeft => {
                 if self.show_tree {
                     self.tree_h_scroll = self.tree_h_scroll.saturating_sub(1);
@@ -454,6 +473,7 @@ mod tests {
             highlight_epoch: 0,
             g_prefix_pending: false,
             should_quit: false,
+            shell_command: None,
             use_difft: false,
         }
     }

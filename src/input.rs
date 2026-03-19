@@ -20,6 +20,8 @@ pub enum Action {
     PrevChange,
     ToggleComments,
     ToggleStage,
+    GitCommit,
+    GitPush,
     Quit,
     None,
 }
@@ -40,6 +42,8 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Char('L') => Action::TreeScrollRight,
         KeyCode::Char('b') => Action::ToggleTree,
         KeyCode::Char('c') => Action::ToggleComments,
+        KeyCode::Char('C') => Action::GitCommit,
+        KeyCode::Char('P') => Action::GitPush,
         KeyCode::Char('R') => Action::Refresh,
         KeyCode::Char('j') => Action::ScrollDown,
         KeyCode::Char('k') => Action::ScrollUp,

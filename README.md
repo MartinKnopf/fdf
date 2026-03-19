@@ -33,6 +33,8 @@
 | `G` | Go to bottom |
 | `n` / `N` | Next / previous change |
 | `u` | Stage / unstage selected file |
+| `C` | Run `git commit` (suspends TUI, resumes after) |
+| `P` | Run `git push` (suspends TUI, waits for Enter/q) |
 | `b` | Toggle file tree |
 | `c` | Toggle comments pane |
 | `R` | Refresh file list |
