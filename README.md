@@ -1,7 +1,7 @@
 # fdf
 
 ## What It Does
-`fdf` is a native terminal diff viewer for git repositories. It shows changed files in a left-side tree with staged/unstaged indicators and renders a full-file side-by-side comparison (`HEAD` vs worktree) for the selected file. The tool is read-only and focused on fast keyboard-driven inspection of changes.
+`fdf` is a native terminal diff viewer for git repositories. It shows changed files in a left-side tree with staged/unstaged indicators and renders a full-file side-by-side comparison (`HEAD` vs worktree) for the selected file. Focused on fast keyboard-driven inspection and staging of changes.
 
 ## Local Development Entrypoints
 - Validate compile: `cargo check`
@@ -19,6 +19,24 @@
 - Docs index: `docs/00-index.md`
 - Agent guide: `AGENTS.md`
 - Architecture overview: `docs/10-architecture-overview.md`
+
+## Keybindings
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Scroll down / up |
+| `h` / `l` | Scroll left / right |
+| `J` / `K` | Next / previous file |
+| `H` / `L` | Tree scroll left / right (file switch when tree hidden) |
+| `Ctrl-d` / `Ctrl-u` | Page down / up |
+| `g g` | Go to top |
+| `G` | Go to bottom |
+| `n` / `N` | Next / previous change |
+| `u` | Stage / unstage selected file |
+| `b` | Toggle file tree |
+| `c` | Toggle comments pane |
+| `R` | Refresh file list |
+| `q` | Quit |
 
 ## High-Level Architecture
 The app has a small modular architecture:

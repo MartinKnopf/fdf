@@ -19,6 +19,7 @@ pub enum Action {
     NextChange,
     PrevChange,
     ToggleComments,
+    ToggleStage,
     Quit,
     None,
 }
@@ -48,6 +49,7 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Char('G') => Action::GoBottom,
         KeyCode::Char('n') => Action::NextChange,
         KeyCode::Char('N') => Action::PrevChange,
+        KeyCode::Char('u') => Action::ToggleStage,
         KeyCode::Char('q') => Action::Quit,
         _ => Action::None,
     }

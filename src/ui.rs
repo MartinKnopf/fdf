@@ -93,6 +93,13 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 .collect();
             let style = if row.is_dir {
                 Style::default().fg(Color::Blue)
+            } else if row
+                .file_index
+                .and_then(|i| app.files.get(i))
+                .map(|f| f.status.staged)
+                .unwrap_or(false)
+            {
+                Style::default().fg(Color::Green)
             } else {
                 Style::default()
             };
@@ -135,14 +142,20 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let mut used_width: usize = 0;
     let mut all_fit = true;
 
-    for (idx, file) in app.files.iter().enumerate() {
+    // Use tree order for tab display so tabs match the file tree panel.
+    let file_indices: Vec<usize> = app.tree_rows.iter().filter_map(|r| r.file_index).collect();
+
+    for (tab_pos, &file_idx) in file_indices.iter().enumerate() {
+        let Some(file) = app.files.get(file_idx) else {
+            continue;
+        };
         let filename = file
             .path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| file.path.to_string_lossy().into_owned());
 
-        let is_selected = idx == app.selected_file_idx;
+        let is_selected = file_idx == app.selected_file_idx;
         // Selected: "[name]", others: "name"; space separator between tabs
         let label = if is_selected {
             format!("[{}]", filename)
@@ -150,7 +163,7 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             filename
         };
         let label_width = label.chars().count();
-        let sep_width = if idx == 0 { 0 } else { 1 }; // single space
+        let sep_width = if tab_pos == 0 { 0 } else { 1 }; // single space
         let tab_width = sep_width + label_width;
 
         // Check if this tab fits; if not, append ellipsis and stop
@@ -158,7 +171,7 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
         if tab_width > remaining {
             if remaining > 0 {
-                if idx > 0 && remaining >= 2 {
+                if tab_pos > 0 && remaining >= 2 {
                     spans.push(Span::styled(" ", Style::default()));
                 }
                 spans.push(Span::styled(
@@ -170,16 +183,19 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             break;
         }
 
-        if idx > 0 {
+        if tab_pos > 0 {
             spans.push(Span::styled(" ", Style::default()));
         }
 
+        let is_staged = file.status.staged;
         let style = if is_selected {
+            let color = if is_staged { Color::Green } else { Color::White };
             Style::default()
                 .add_modifier(Modifier::BOLD)
-                .fg(Color::White)
+                .fg(color)
         } else {
-            Style::default().fg(Color::Gray)
+            let color = if is_staged { Color::Green } else { Color::Gray };
+            Style::default().fg(color)
         };
 
         spans.push(Span::styled(label, style));
@@ -462,15 +478,124 @@ fn build_highlighted_rows(rows: &[AlignedRow], syntax: &SyntaxReference) -> Vec<
     let mut right_highlighter = HighlightLines::new(syntax, syntax_theme());
     let mut highlighted_rows = Vec::with_capacity(rows.len());
 
+    let base = Style::default();
+    // Diff styles: colored background, white foreground
+    let del_style = Style::default().fg(Color::White).bg(DIFF_RED);
+    let add_style = Style::default().fg(Color::White).bg(DIFF_GREEN);
+
     for row in rows {
-        let base = row_style(row.kind);
+        // Always advance highlighter state to keep it in sync, but only use
+        // syntax colors on Equal lines. Diff lines use colored blocks.
+        let left_syn = highlight_line(&row.left_text, &mut left_highlighter, base);
+        let right_syn = highlight_line(&row.right_text, &mut right_highlighter, base);
+
+        let (left_spans, right_spans) = match row.kind {
+            RowKind::Equal => (left_syn, right_syn),
+            RowKind::Delete => {
+                let left = styled_spans(&row.left_text, del_style);
+                let right = plain_spans(&row.right_text, DIFF_DIM);
+                (left, right)
+            }
+            RowKind::Insert => {
+                let left = plain_spans(&row.left_text, DIFF_DIM);
+                let right = styled_spans(&row.right_text, add_style);
+                (left, right)
+            }
+            RowKind::Changed => {
+                let left = if !row.left_changed_ranges.is_empty() {
+                    apply_inline_highlights_plain(
+                        &row.left_text,
+                        &row.left_changed_ranges,
+                        DIFF_DIM,
+                        del_style,
+                    )
+                } else {
+                    styled_spans(&row.left_text, del_style)
+                };
+                let right = if !row.right_changed_ranges.is_empty() {
+                    apply_inline_highlights_plain(
+                        &row.right_text,
+                        &row.right_changed_ranges,
+                        DIFF_DIM,
+                        add_style,
+                    )
+                } else {
+                    styled_spans(&row.right_text, add_style)
+                };
+                (left, right)
+            }
+        };
+
         highlighted_rows.push(HighlightedRow {
-            left: highlight_line(&row.left_text, &mut left_highlighter, base),
-            right: highlight_line(&row.right_text, &mut right_highlighter, base),
+            left: left_spans,
+            right: right_spans,
         });
     }
 
     highlighted_rows
+}
+
+const DIFF_RED: Color = Color::Rgb(140, 40, 40);
+const DIFF_GREEN: Color = Color::Rgb(30, 110, 45);
+/// Dimmed color for unchanged portions of diff lines.
+const DIFF_DIM: Color = Color::Rgb(140, 140, 140);
+
+/// Create a single span with the given style.
+fn styled_spans(text: &str, style: Style) -> Vec<Span<'static>> {
+    vec![Span::styled(text.to_string(), style)]
+}
+
+/// Create a single span with the given foreground color.
+fn plain_spans(text: &str, color: Color) -> Vec<Span<'static>> {
+    vec![Span::styled(
+        text.to_string(),
+        Style::default().fg(color),
+    )]
+}
+
+/// Build spans for a diff line without syntax highlighting.
+/// Unchanged portions use `base_color` foreground, changed ranges use `highlight_style`.
+fn apply_inline_highlights_plain(
+    text: &str,
+    changed_ranges: &[std::ops::Range<usize>],
+    base_color: Color,
+    highlight_style: Style,
+) -> Vec<Span<'static>> {
+    let mut result = Vec::new();
+    let mut pos = 0usize;
+
+    for range in changed_ranges {
+        if range.start > pos {
+            let chunk: String = text
+                .get(pos..range.start)
+                .unwrap_or("")
+                .to_string();
+            if !chunk.is_empty() {
+                result.push(Span::styled(chunk, Style::default().fg(base_color)));
+            }
+        }
+        let chunk: String = text
+            .get(range.start..range.end)
+            .unwrap_or("")
+            .to_string();
+        if !chunk.is_empty() {
+            result.push(Span::styled(chunk, highlight_style));
+        }
+        pos = range.end;
+    }
+
+    if pos < text.len() {
+        let chunk = text[pos..].to_string();
+        if !chunk.is_empty() {
+            result.push(Span::styled(chunk, Style::default().fg(base_color)));
+        }
+    }
+
+    if result.is_empty() {
+        plain_spans(text, base_color)
+    } else {
+        result
+    }
 }
 
 fn clip_spans(spans: &[Span<'static>], offset: usize, max_chars: usize) -> Vec<Span<'static>> {
@@ -558,12 +683,82 @@ fn trim_trailing_newline(spans: &mut Vec<Span<'static>>) {
 
 fn syntax_set() -> &'static SyntaxSet {
     static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
+    SYNTAX_SET.get_or_init(|| build_syntax_set().unwrap_or_else(|_| SyntaxSet::load_defaults_newlines()))
 }
 
+/// Build a SyntaxSet with updated bundled syntax definitions overlaying the defaults.
+fn build_syntax_set() -> Result<SyntaxSet, Box<dyn std::error::Error>> {
+    use syntect::parsing::SyntaxSetBuilder;
+
+    // Write bundled syntax files to a temp dir so syntect can load them
+    let dir = tempfile::tempdir()?;
+    let js_path = dir.path().join("JavaScript.sublime-syntax");
+    std::fs::write(
+        &js_path,
+        include_bytes!("../assets/syntaxes/JavaScript.sublime-syntax"),
+    )?;
+
+    // Start from defaults, then add updated syntaxes on top (replaces by name)
+    let mut builder: SyntaxSetBuilder = SyntaxSet::load_defaults_newlines().into_builder();
+    builder.add_from_folder(dir.path(), false)?;
+    Ok(builder.build())
+}
+
+/// Set the syntax theme by name. Must be called before any rendering.
+/// Returns an error message if the theme name is not found.
+pub fn set_syntax_theme(name: &str) -> Result<(), String> {
+    let theme = load_theme_by_name(name)?;
+    SYNTAX_THEME
+        .set(theme)
+        .map_err(|_| "Syntax theme already initialized".to_string())
+}
+
+fn load_theme_by_name(name: &str) -> Result<Theme, String> {
+    // Check bundled custom themes first
+    if let Some(theme) = load_bundled_theme(name) {
+        return Ok(theme);
+    }
+
+    // Fall back to syntect built-in themes
+    let themes = ThemeSet::load_defaults();
+    themes
+        .themes
+        .get(name)
+        .cloned()
+        .ok_or_else(|| {
+            let mut available: Vec<&str> = themes.themes.keys().map(|k| k.as_str()).collect();
+            available.extend(BUNDLED_THEMES.iter().map(|(name, _)| *name));
+            available.sort();
+            format!(
+                "Unknown syntax theme '{}'. Available: {}",
+                name,
+                available.join(", ")
+            )
+        })
+}
+
+/// Themes bundled as embedded .tmTheme data.
+const BUNDLED_THEMES: &[(&str, &[u8])] = &[
+    ("Dracula", include_bytes!("../assets/themes/Dracula.tmTheme")),
+];
+
+fn load_bundled_theme(name: &str) -> Option<Theme> {
+    BUNDLED_THEMES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .and_then(|(_, data)| {
+            let mut cursor = std::io::Cursor::new(*data);
+            ThemeSet::load_from_reader(&mut cursor).ok()
+        })
+}
+
+static SYNTAX_THEME: OnceLock<Theme> = OnceLock::new();
+
 fn syntax_theme() -> &'static Theme {
-    static THEME: OnceLock<Theme> = OnceLock::new();
-    THEME.get_or_init(|| {
+    SYNTAX_THEME.get_or_init(|| {
+        if let Some(theme) = load_bundled_theme("Dracula") {
+            return theme;
+        }
         let themes = ThemeSet::load_defaults();
         themes
             .themes
@@ -625,13 +820,8 @@ fn syntect_to_ratatui_style(style: SyntectStyle, base: Style) -> Style {
     mapped
 }
 
-fn row_style(kind: RowKind) -> Style {
-    match kind {
-        RowKind::Equal => Style::default(),
-        RowKind::Changed => Style::default().bg(Color::Rgb(63, 54, 18)),
-        RowKind::Insert => Style::default().bg(Color::Rgb(18, 60, 36)),
-        RowKind::Delete => Style::default().bg(Color::Rgb(72, 24, 24)),
-    }
+fn row_style(_kind: RowKind) -> Style {
+    Style::default()
 }
 
 fn selected_tree_row_idx(app: &App) -> Option<usize> {
@@ -861,6 +1051,8 @@ mod tests {
             left_text: "let value = 1;".to_string(),
             right_text: "let value = 1;".to_string(),
             kind: RowKind::Equal,
+            left_changed_ranges: Vec::new(),
+            right_changed_ranges: Vec::new(),
         }];
 
         let first = with_highlighted_rows_for_file(file_path, &rows, syntax, 10, |highlighted| {

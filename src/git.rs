@@ -126,6 +126,36 @@ pub fn load_file_contents(repo_root: &Path, file: &mut ChangedFile) -> Result<()
     Ok(())
 }
 
+/// Stage a file (git add) or unstage it (git restore --staged).
+/// If the file has only staged changes, unstage it; otherwise stage it.
+pub fn toggle_stage(repo_root: &Path, file: &ChangedFile) -> Result<()> {
+    let path_str = file.path.to_string_lossy();
+    if file.status.staged && !file.status.unstaged && !file.status.untracked {
+        // Fully staged — unstage it.
+        let out = Command::new("git")
+            .args(["restore", "--staged", &path_str])
+            .current_dir(repo_root)
+            .output()
+            .context("failed to run git restore --staged")?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(anyhow!("git restore --staged failed: {}", stderr));
+        }
+    } else {
+        // Unstaged, untracked, or partially staged — stage it.
+        let out = Command::new("git")
+            .args(["add", &path_str])
+            .current_dir(repo_root)
+            .output()
+            .context("failed to run git add")?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(anyhow!("git add failed: {}", stderr));
+        }
+    }
+    Ok(())
+}
+
 fn parse_xy(xy: &str) -> (bool, bool) {
     let mut chars = xy.chars();
     let x = chars.next().unwrap_or('.');

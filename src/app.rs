@@ -25,13 +25,16 @@ pub struct App {
     pub highlight_epoch: u64,
     pub g_prefix_pending: bool,
     pub should_quit: bool,
+    pub use_difft: bool,
 }
 
 impl App {
-    pub fn new(repo_root: PathBuf, comments: Comments) -> Result<Self> {
+    pub fn new(repo_root: PathBuf, comments: Comments, use_difft: bool) -> Result<Self> {
         let files = git::collect_changed_files(&repo_root)?;
         let tree = tree::build_tree(&files);
         let tree_rows = tree::flatten_tree(&tree, &files);
+
+        let use_difft = use_difft && crate::difft::is_available();
 
         let mut app = Self {
             repo_root,
@@ -49,6 +52,7 @@ impl App {
             highlight_epoch: 0,
             g_prefix_pending: false,
             should_quit: false,
+            use_difft,
         };
 
         if !app.files.is_empty() {
@@ -86,6 +90,7 @@ impl App {
                 }
             }
             Action::Refresh => self.refresh()?,
+            Action::ToggleStage => self.toggle_stage()?,
             Action::TreeScrollLeft => {
                 if self.show_tree {
                     self.tree_h_scroll = self.tree_h_scroll.saturating_sub(1);
@@ -257,7 +262,11 @@ impl App {
         if file.aligned_rows.is_none() {
             let rows = match (&file.old_content, &file.new_content) {
                 (Some(ContentData::Text(old)), Some(ContentData::Text(new))) => {
-                    align_full_file(old, new)
+                    let mut rows = align_full_file(old, new);
+                    if self.use_difft {
+                        let _ = crate::difft::enrich_rows(&mut rows, old, new, &file.path);
+                    }
+                    rows
                 }
                 _ => vec![AlignedRow {
                     left_line_no: None,
@@ -265,12 +274,22 @@ impl App {
                     left_text: "[binary or non-utf8 file]".to_string(),
                     right_text: "[binary or non-utf8 file]".to_string(),
                     kind: crate::model::RowKind::Changed,
+                    left_changed_ranges: Vec::new(),
+                    right_changed_ranges: Vec::new(),
                 }],
             };
             file.aligned_rows = Some(rows);
         }
 
         self.clamp_scroll();
+        Ok(())
+    }
+
+    fn toggle_stage(&mut self) -> Result<()> {
+        if let Some(file) = self.files.get(self.selected_file_idx) {
+            git::toggle_stage(&self.repo_root, file)?;
+            self.refresh()?;
+        }
         Ok(())
     }
 
@@ -435,6 +454,7 @@ mod tests {
             highlight_epoch: 0,
             g_prefix_pending: false,
             should_quit: false,
+            use_difft: false,
         }
     }
 
