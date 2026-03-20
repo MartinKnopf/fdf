@@ -5,13 +5,13 @@ use std::sync::OnceLock;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style as SyntectStyle, Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-use crate::app::App;
+use crate::app::{App, PendingAction};
 use crate::comments::CommentRow;
 use crate::model::{AlignedRow, RowKind};
 
@@ -71,6 +71,10 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
     } else {
         render_diff(frame, app, frame.area());
     }
+
+    if app.show_help {
+        render_help_overlay(frame);
+    }
 }
 
 pub fn viewport_rows(area: Rect) -> usize {
@@ -85,14 +89,27 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .iter()
         .map(|row| {
             let indent = "  ".repeat(row.depth);
-            let full_label = format!("{}{}", indent, row.label);
-            let clipped_label: String = full_label
+            let pending_file_idx = match app.pending_confirm {
+                Some(PendingAction::Checkout(idx) | PendingAction::Delete(idx)) => Some(idx),
+                None => None,
+            };
+            let is_pending = row.file_index == pending_file_idx && !row.is_dir;
+            let label = if is_pending {
+                // Replace the status indicator with [y]
+                let name_part = row.label.split("] ").last().unwrap_or(&row.label);
+                format!("{}[y] {}", indent, name_part)
+            } else {
+                format!("{}{}", indent, row.label)
+            };
+            let clipped_label: String = label
                 .chars()
                 .skip(app.tree_h_scroll)
                 .take(content_width)
                 .collect();
             let style = if row.is_dir {
                 Style::default().fg(Color::Blue)
+            } else if is_pending {
+                Style::default().fg(Color::Rgb(255, 165, 0))
             } else if row
                 .file_index
                 .and_then(|i| app.files.get(i))
@@ -187,14 +204,23 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             spans.push(Span::styled(" ", Style::default()));
         }
 
-        let is_staged = file.status.staged;
-        let style = if is_selected {
-            let color = if is_staged { Color::Green } else { Color::White };
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(color)
+        let pending_file_idx = match app.pending_confirm {
+            Some(PendingAction::Checkout(idx) | PendingAction::Delete(idx)) => Some(idx),
+            None => None,
+        };
+        let is_pending = pending_file_idx == Some(file_idx);
+        let color = if is_pending {
+            Color::Rgb(255, 165, 0)
+        } else if file.status.staged {
+            Color::Green
+        } else if is_selected {
+            Color::White
         } else {
-            let color = if is_staged { Color::Green } else { Color::Gray };
+            Color::Gray
+        };
+        let style = if is_selected {
+            Style::default().add_modifier(Modifier::BOLD).fg(color)
+        } else {
             Style::default().fg(color)
         };
 
@@ -212,6 +238,62 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
+}
+
+fn render_help_overlay(frame: &mut Frame<'_>) {
+    let area = frame.area();
+
+    let keybindings: &[(&str, &str)] = &[
+        ("j / k", "Scroll down / up"),
+        ("h / l", "Scroll left / right"),
+        ("Ctrl-d / Ctrl-u", "Page down / up"),
+        ("g g / G", "Go to top / bottom"),
+        ("n / N", "Next / previous change"),
+        ("J / K", "Next / previous file"),
+        ("H / L", "Tree scroll left / right"),
+        ("Space", "Stage / unstage file"),
+        ("!", "Checkout file (discard changes)"),
+        ("d", "Delete file"),
+        ("C", "Git commit"),
+        ("p", "Git pull"),
+        ("P", "Git push"),
+        ("b", "Toggle file tree"),
+        ("c", "Toggle comments"),
+        ("R", "Refresh"),
+        ("?", "Show this help"),
+        ("Esc", "Close this help"),
+        ("q", "Quit"),
+    ];
+
+    let lines: Vec<Line<'static>> = keybindings
+        .iter()
+        .map(|(key, desc)| {
+            Line::from(vec![
+                Span::styled(
+                    format!("{:<20}", key),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(desc.to_string(), Style::default().fg(Color::White)),
+            ])
+        })
+        .collect();
+
+    let content_height = lines.len() as u16 + 2; // +2 for borders
+    let content_width = 44u16 + 2; // +2 for borders
+
+    let x = area.width.saturating_sub(content_width) / 2;
+    let y = area.height.saturating_sub(content_height) / 2;
+    let overlay = Rect::new(x, y, content_width.min(area.width), content_height.min(area.height));
+
+    frame.render_widget(Clear, overlay);
+    let block = Block::default()
+        .title(" Keybindings ")
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Rgb(40, 42, 54)));
+    let help = Paragraph::new(lines).block(block);
+    frame.render_widget(help, overlay);
 }
 
 fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {

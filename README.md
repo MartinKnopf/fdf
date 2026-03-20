@@ -32,12 +32,17 @@
 | `g g` | Go to top |
 | `G` | Go to bottom |
 | `n` / `N` | Next / previous change |
-| `u` | Stage / unstage selected file |
+| `Space` | Stage / unstage selected file |
+| `!` | Checkout file (discard changes, confirm with `y`) |
+| `d` | Delete file (confirm with `y`) |
 | `C` | Run `git commit` (suspends TUI, resumes after) |
+| `p` | Run `git pull` (suspends TUI, waits for Enter/q) |
 | `P` | Run `git push` (suspends TUI, waits for Enter/q) |
 | `b` | Toggle file tree |
 | `c` | Toggle comments pane |
 | `R` | Refresh file list |
+| `?` | Show keybindings help |
+| `Esc` | Close help overlay |
 | `q` | Quit |
 
 ## High-Level Architecture

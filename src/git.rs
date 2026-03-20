@@ -156,6 +156,21 @@ pub fn toggle_stage(repo_root: &Path, file: &ChangedFile) -> Result<()> {
     Ok(())
 }
 
+/// Discard unstaged changes by checking out the file from the index.
+pub fn checkout_file(repo_root: &Path, file: &ChangedFile) -> Result<()> {
+    let path_str = file.path.to_string_lossy();
+    let out = Command::new("git")
+        .args(["checkout", "--", &path_str])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to run git checkout")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(anyhow!("git checkout failed: {}", stderr));
+    }
+    Ok(())
+}
+
 fn parse_xy(xy: &str) -> (bool, bool) {
     let mut chars = xy.chars();
     let x = chars.next().unwrap_or('.');

@@ -124,12 +124,17 @@ KEYBINDINGS
     g g / G         Jump to top / bottom
     J / K           Select next / previous file
     H / L           Scroll tree left / right
-    u               Stage / unstage selected file
+    Space           Stage / unstage selected file
+    !               Checkout file (discard changes, y to confirm)
+    d               Delete file (y to confirm)
     C               Run git commit (suspends TUI)
+    p               Run git pull (suspends TUI, wait for key)
     P               Run git push (suspends TUI, wait for key)
     b               Toggle file tree panel
     c               Toggle comments panel (requires -c)
     R               Refresh diff from disk
+    ?               Show keybindings help
+    Esc             Close help overlay
     q               Quit
 
 COMMENTS FILE

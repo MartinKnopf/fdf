@@ -14,6 +14,12 @@ pub struct ShellCommand {
     pub wait_for_key: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAction {
+    Checkout(usize),
+    Delete(usize),
+}
+
 pub struct App {
     pub repo_root: PathBuf,
     pub files: Vec<ChangedFile>,
@@ -29,6 +35,8 @@ pub struct App {
     pub viewport_rows: usize,
     pub highlight_epoch: u64,
     pub g_prefix_pending: bool,
+    pub show_help: bool,
+    pub pending_confirm: Option<PendingAction>,
     pub should_quit: bool,
     pub shell_command: Option<ShellCommand>,
     pub use_difft: bool,
@@ -57,6 +65,8 @@ impl App {
             viewport_rows: 1,
             highlight_epoch: 0,
             g_prefix_pending: false,
+            show_help: false,
+            pending_confirm: None,
             should_quit: false,
             shell_command: None,
             use_difft,
@@ -70,6 +80,39 @@ impl App {
     }
 
     pub fn on_action(&mut self, action: Action) -> Result<()> {
+        // While help overlay is shown, only allow closing it.
+        if self.show_help {
+            match action {
+                Action::CloseOverlay | Action::ShowHelp | Action::Quit => {
+                    self.show_help = false;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        // While a destructive confirmation is pending, y confirms, anything else cancels.
+        if let Some(pending) = self.pending_confirm.take() {
+            if matches!(action, Action::ConfirmYes) {
+                match pending {
+                    PendingAction::Checkout(idx) => {
+                        if let Some(file) = self.files.get(idx) {
+                            git::checkout_file(&self.repo_root, file)?;
+                            self.refresh()?;
+                        }
+                    }
+                    PendingAction::Delete(idx) => {
+                        if let Some(file) = self.files.get(idx) {
+                            let full_path = self.repo_root.join(&file.path);
+                            std::fs::remove_file(&full_path)?;
+                            self.refresh()?;
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+
         if matches!(action, Action::PrefixG) {
             if self.g_prefix_pending {
                 self.go_top();
@@ -102,6 +145,12 @@ impl App {
                 self.shell_command = Some(ShellCommand {
                     args: vec!["git".into(), "commit".into()],
                     wait_for_key: false,
+                });
+            }
+            Action::GitPull => {
+                self.shell_command = Some(ShellCommand {
+                    args: vec!["git".into(), "pull".into()],
+                    wait_for_key: true,
                 });
             }
             Action::GitPush => {
@@ -141,6 +190,23 @@ impl App {
             Action::GoBottom => self.go_bottom(),
             Action::NextChange => self.jump_next_change(),
             Action::PrevChange => self.jump_prev_change(),
+            Action::CheckoutFile => {
+                let idx = self.selected_file_idx;
+                if let Some(file) = self.files.get(idx) {
+                    if file.status.unstaged && !file.status.untracked {
+                        self.pending_confirm = Some(PendingAction::Checkout(idx));
+                    }
+                }
+            }
+            Action::DeleteFile => {
+                let idx = self.selected_file_idx;
+                if self.files.get(idx).is_some() {
+                    self.pending_confirm = Some(PendingAction::Delete(idx));
+                }
+            }
+            Action::ConfirmYes => {}
+            Action::ShowHelp => self.show_help = true,
+            Action::CloseOverlay => {}
             Action::Quit => self.should_quit = true,
             Action::None => {}
             Action::PrefixG => {}
@@ -472,6 +538,8 @@ mod tests {
             viewport_rows: 1,
             highlight_epoch: 0,
             g_prefix_pending: false,
+            show_help: false,
+            pending_confirm: None,
             should_quit: false,
             shell_command: None,
             use_difft: false,
