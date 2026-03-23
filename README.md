@@ -24,10 +24,10 @@
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Scroll down / up |
-| `h` / `l` | Scroll left / right |
-| `J` / `K` | Next / previous file |
-| `H` / `L` | Tree scroll left / right (file switch when tree hidden) |
+| `j` / `k` | Next / previous file |
+| `h` / `l` | Tree scroll left / right (file switch when tree hidden) |
+| `J` / `K` | Scroll down / up |
+| `H` / `L` | Scroll left / right |
 | `Ctrl-d` / `Ctrl-u` | Page down / up |
 | `g g` | Go to top |
 | `G` | Go to bottom |

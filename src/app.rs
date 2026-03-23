@@ -22,6 +22,7 @@ pub enum PendingAction {
 
 pub struct App {
     pub repo_root: PathBuf,
+    pub branch: String,
     pub files: Vec<ChangedFile>,
     pub tree_rows: Vec<TreeRow>,
     pub show_tree: bool,
@@ -49,9 +50,11 @@ impl App {
         let tree_rows = tree::flatten_tree(&tree, &files);
 
         let use_difft = use_difft && crate::difft::is_available();
+        let branch = git::current_branch(&repo_root);
 
         let mut app = Self {
             repo_root,
+            branch,
             files,
             tree_rows,
             show_tree: true,
@@ -380,6 +383,7 @@ impl App {
 
     fn refresh(&mut self) -> Result<()> {
         let files = git::collect_changed_files(&self.repo_root)?;
+        self.branch = git::current_branch(&self.repo_root);
         self.apply_refreshed_files(files);
         self.ensure_selected_loaded()
     }
@@ -525,6 +529,7 @@ mod tests {
     fn app_for_test() -> App {
         App {
             repo_root: PathBuf::new(),
+            branch: String::from("main"),
             files: Vec::new(),
             tree_rows: Vec::new(),
             show_tree: true,

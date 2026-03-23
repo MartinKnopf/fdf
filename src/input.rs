@@ -42,20 +42,20 @@ pub fn map_key(key: KeyEvent) -> Action {
     }
 
     match key.code {
-        KeyCode::Char('K') => Action::SelectPrevFile,
-        KeyCode::Char('J') => Action::SelectNextFile,
-        KeyCode::Char('H') => Action::TreeScrollLeft,
-        KeyCode::Char('L') => Action::TreeScrollRight,
+        KeyCode::Char('j') => Action::SelectNextFile,
+        KeyCode::Char('k') => Action::SelectPrevFile,
+        KeyCode::Char('h') => Action::TreeScrollLeft,
+        KeyCode::Char('l') => Action::TreeScrollRight,
+        KeyCode::Char('J') => Action::ScrollDown,
+        KeyCode::Char('K') => Action::ScrollUp,
+        KeyCode::Char('H') => Action::ScrollLeft,
+        KeyCode::Char('L') => Action::ScrollRight,
         KeyCode::Char('b') => Action::ToggleTree,
         KeyCode::Char('c') => Action::ToggleComments,
         KeyCode::Char('C') => Action::GitCommit,
         KeyCode::Char('p') => Action::GitPull,
         KeyCode::Char('P') => Action::GitPush,
         KeyCode::Char('R') => Action::Refresh,
-        KeyCode::Char('j') => Action::ScrollDown,
-        KeyCode::Char('k') => Action::ScrollUp,
-        KeyCode::Char('h') => Action::ScrollLeft,
-        KeyCode::Char('l') => Action::ScrollRight,
         KeyCode::Char('g') => Action::PrefixG,
         KeyCode::Char('G') => Action::GoBottom,
         KeyCode::Char('n') => Action::NextChange,
@@ -89,21 +89,39 @@ mod tests {
     }
 
     #[test]
-    fn maps_shift_jk_to_tree_file_selection() {
-        let prev = map_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
-        let next = map_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
+    fn maps_jk_to_file_selection() {
+        let prev = map_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        let next = map_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
 
         assert!(matches!(prev, Action::SelectPrevFile));
         assert!(matches!(next, Action::SelectNextFile));
     }
 
     #[test]
-    fn maps_shift_hl_to_tree_horizontal_scroll() {
-        let left = map_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
-        let right = map_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT));
+    fn maps_hl_to_tree_horizontal_scroll() {
+        let left = map_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        let right = map_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
 
         assert!(matches!(left, Action::TreeScrollLeft));
         assert!(matches!(right, Action::TreeScrollRight));
+    }
+
+    #[test]
+    fn maps_shift_jk_to_content_scroll() {
+        let down = map_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
+        let up = map_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+
+        assert!(matches!(down, Action::ScrollDown));
+        assert!(matches!(up, Action::ScrollUp));
+    }
+
+    #[test]
+    fn maps_shift_hl_to_content_horizontal_scroll() {
+        let left = map_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+        let right = map_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT));
+
+        assert!(matches!(left, Action::ScrollLeft));
+        assert!(matches!(right, Action::ScrollRight));
     }
 
     #[test]

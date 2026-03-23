@@ -19,6 +19,22 @@ pub fn repo_root() -> Result<PathBuf> {
     Ok(PathBuf::from(root.trim()))
 }
 
+pub fn current_branch(repo_root: &Path) -> String {
+    let out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .ok();
+    out.and_then(|o| {
+        if o.status.success() {
+            String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
+        } else {
+            None
+        }
+    })
+    .unwrap_or_else(|| "unknown".to_string())
+}
+
 pub fn collect_changed_files(repo_root: &Path) -> Result<Vec<ChangedFile>> {
     let out = Command::new("git")
         .arg("status")

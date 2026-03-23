@@ -117,13 +117,13 @@ OPTIONS
     -h, --help              Print this help message and exit
 
 KEYBINDINGS
-    j / k           Scroll down / up
-    h / l           Scroll left / right
+    j / k           Select next / previous file
+    h / l           Scroll tree left / right
+    J / K           Scroll down / up
+    H / L           Scroll left / right
     Ctrl-d / Ctrl-u Page down / up
     n / N           Jump to next / previous change block
     g g / G         Jump to top / bottom
-    J / K           Select next / previous file
-    H / L           Scroll tree left / right
     Space           Stage / unstage selected file
     !               Checkout file (discard changes, y to confirm)
     d               Delete file (y to confirm)

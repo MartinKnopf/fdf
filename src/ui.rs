@@ -35,16 +35,24 @@ thread_local! {
 }
 
 pub fn render(frame: &mut Frame<'_>, app: &mut App) {
+    // Split: main content area + 1-row status bar at the bottom.
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(frame.area());
+    let main_area = outer[0];
+    let status_area = outer[1];
+
     // Compute comment pane width so App can wrap comments to fit.
     if app.show_comments {
         let diff_area = if app.show_tree {
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
-                .split(frame.area());
+                .split(main_area);
             chunks[1]
         } else {
-            frame.area()
+            main_area
         };
         let comment_pane = Layout::default()
             .direction(Direction::Horizontal)
@@ -64,13 +72,15 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
-            .split(frame.area());
+            .split(main_area);
 
         render_tree(frame, app, chunks[0]);
         render_diff(frame, app, chunks[1]);
     } else {
-        render_diff(frame, app, frame.area());
+        render_diff(frame, app, main_area);
     }
+
+    render_status_bar(frame, app, status_area);
 
     if app.show_help {
         render_help_overlay(frame);
@@ -147,6 +157,33 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
         );
 
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let branch_span = Span::styled(
+        format!(" {} ", app.branch),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Green)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let file_count = format!(" {} changed files ", app.files.len());
+    let file_span = Span::styled(
+        file_count,
+        Style::default().fg(Color::White).bg(Color::DarkGray),
+    );
+
+    let hint = " ? for help ";
+    let hint_span = Span::styled(hint, Style::default().fg(Color::DarkGray));
+
+    let line = Line::from(vec![branch_span, file_span, hint_span]);
+    let bar = Paragraph::new(line).style(Style::default().bg(Color::Rgb(40, 42, 54)));
+    frame.render_widget(bar, area);
 }
 
 fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -244,13 +281,13 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
     let area = frame.area();
 
     let keybindings: &[(&str, &str)] = &[
-        ("j / k", "Scroll down / up"),
-        ("h / l", "Scroll left / right"),
+        ("j / k", "Next / previous file"),
+        ("h / l", "Tree scroll left / right"),
+        ("J / K", "Scroll down / up"),
+        ("H / L", "Scroll left / right"),
         ("Ctrl-d / Ctrl-u", "Page down / up"),
         ("g g / G", "Go to top / bottom"),
         ("n / N", "Next / previous change"),
-        ("J / K", "Next / previous file"),
-        ("H / L", "Tree scroll left / right"),
         ("Space", "Stage / unstage file"),
         ("!", "Checkout file (discard changes)"),
         ("d", "Delete file"),
