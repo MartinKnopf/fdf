@@ -14,10 +14,12 @@ pub struct ShellCommand {
     pub wait_for_key: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingAction {
     Checkout(usize),
     Delete(usize),
+    CheckoutDir(Vec<usize>, String),
+    DeleteDir(Vec<usize>, String),
 }
 
 pub struct App {
@@ -30,7 +32,7 @@ pub struct App {
     pub comments: Comments,
     pub comment_wrap_width: usize,
     pub tree_h_scroll: usize,
-    pub selected_file_idx: usize,
+    pub selected_tree_idx: usize,
     pub v_scroll: usize,
     pub h_scroll: usize,
     pub viewport_rows: usize,
@@ -62,7 +64,7 @@ impl App {
             comments,
             comment_wrap_width: 0,
             tree_h_scroll: 0,
-            selected_file_idx: 0,
+            selected_tree_idx: 0,
             v_scroll: 0,
             h_scroll: 0,
             viewport_rows: 1,
@@ -76,6 +78,12 @@ impl App {
         };
 
         if !app.files.is_empty() {
+            // Start on the first file row, not a directory row.
+            app.selected_tree_idx = app
+                .tree_rows
+                .iter()
+                .position(|r| r.file_index.is_some())
+                .unwrap_or(0);
             app.ensure_selected_loaded()?;
         }
 
@@ -111,6 +119,25 @@ impl App {
                             self.refresh()?;
                         }
                     }
+                    PendingAction::CheckoutDir(indices, _) => {
+                        for idx in indices {
+                            if let Some(file) = self.files.get(idx) {
+                                if file.status.unstaged && !file.status.untracked {
+                                    git::checkout_file(&self.repo_root, file)?;
+                                }
+                            }
+                        }
+                        self.refresh()?;
+                    }
+                    PendingAction::DeleteDir(indices, _) => {
+                        for idx in indices {
+                            if let Some(file) = self.files.get(idx) {
+                                let full_path = self.repo_root.join(&file.path);
+                                let _ = std::fs::remove_file(&full_path);
+                            }
+                        }
+                        self.refresh()?;
+                    }
                 }
             }
             return Ok(());
@@ -132,8 +159,8 @@ impl App {
         }
 
         match action {
-            Action::SelectPrevFile => self.select_prev_file()?,
-            Action::SelectNextFile => self.select_next_file()?,
+            Action::SelectPrevFile => self.select_prev()?,
+            Action::SelectNextFile => self.select_next()?,
             Action::ToggleTree => {
                 self.show_tree = !self.show_tree;
             }
@@ -143,7 +170,8 @@ impl App {
                 }
             }
             Action::Refresh => self.refresh()?,
-            Action::ToggleStage => self.toggle_stage()?,
+            Action::ToggleStage => self.toggle_stage_selected()?,
+
             Action::GitCommit => {
                 self.shell_command = Some(ShellCommand {
                     args: vec!["git".into(), "commit".into()],
@@ -193,20 +221,8 @@ impl App {
             Action::GoBottom => self.go_bottom(),
             Action::NextChange => self.jump_next_change(),
             Action::PrevChange => self.jump_prev_change(),
-            Action::CheckoutFile => {
-                let idx = self.selected_file_idx;
-                if let Some(file) = self.files.get(idx) {
-                    if file.status.unstaged && !file.status.untracked {
-                        self.pending_confirm = Some(PendingAction::Checkout(idx));
-                    }
-                }
-            }
-            Action::DeleteFile => {
-                let idx = self.selected_file_idx;
-                if self.files.get(idx).is_some() {
-                    self.pending_confirm = Some(PendingAction::Delete(idx));
-                }
-            }
+            Action::CheckoutFile => self.checkout_selected(),
+            Action::DeleteFile => self.delete_selected(),
             Action::ConfirmYes => {}
             Action::ShowHelp => self.show_help = true,
             Action::CloseOverlay => {}
@@ -218,8 +234,20 @@ impl App {
         Ok(())
     }
 
+    /// Returns the currently selected file index (from tree row), if a file row is selected.
+    pub fn selected_file_idx(&self) -> Option<usize> {
+        self.tree_rows
+            .get(self.selected_tree_idx)
+            .and_then(|r| r.file_index)
+    }
+
+    /// Returns the currently selected tree row.
+    pub fn selected_tree_row(&self) -> Option<&TreeRow> {
+        self.tree_rows.get(self.selected_tree_idx)
+    }
+
     pub fn selected_file(&self) -> Option<&ChangedFile> {
-        self.files.get(self.selected_file_idx)
+        self.selected_file_idx().and_then(|idx| self.files.get(idx))
     }
 
     pub fn selected_rows(&self) -> Option<&Vec<AlignedRow>> {
@@ -253,7 +281,10 @@ impl App {
     /// or the cache is empty, so switching back to a previously viewed file is
     /// effectively free and the highlight cache still hits (stable pointer).
     fn ensure_display_rows(&mut self) {
-        let idx = self.selected_file_idx;
+        let Some(idx) = self.selected_file_idx() else {
+            return;
+        };
+        let idx = idx;
         let wrap = self.comment_wrap_width;
         let Some(file) = self.files.get_mut(idx) else {
             return;
@@ -276,71 +307,81 @@ impl App {
         file.display_wrap_width = wrap;
     }
 
-    fn select_prev_file(&mut self) -> Result<()> {
-        if self.files.is_empty() {
+    fn select_prev(&mut self) -> Result<()> {
+        if self.tree_rows.is_empty() {
             return Ok(());
         }
-
-        let file_indices: Vec<usize> = self.tree_rows.iter().filter_map(|r| r.file_index).collect();
-
-        if file_indices.is_empty() {
-            return Ok(());
-        }
-
-        let current_pos = file_indices
-            .iter()
-            .position(|&idx| idx == self.selected_file_idx);
-
-        let new_pos = match current_pos {
-            Some(0) => file_indices.len() - 1,
-            Some(pos) => pos - 1,
-            None => file_indices.len() - 1,
+        let prev = if self.selected_tree_idx == 0 {
+            self.tree_rows.len() - 1
+        } else {
+            self.selected_tree_idx - 1
         };
-
-        let new_idx = file_indices[new_pos];
-        if new_idx == self.selected_file_idx {
-            return Ok(());
-        }
-        self.selected_file_idx = new_idx;
-        self.reset_scroll();
-        self.ensure_selected_loaded()
+        self.select_tree_row(prev)
     }
 
-    fn select_next_file(&mut self) -> Result<()> {
-        if self.files.is_empty() {
+    fn select_next(&mut self) -> Result<()> {
+        if self.tree_rows.is_empty() {
             return Ok(());
         }
+        let next = (self.selected_tree_idx + 1) % self.tree_rows.len();
+        self.select_tree_row(next)
+    }
 
-        let file_indices: Vec<usize> = self.tree_rows.iter().filter_map(|r| r.file_index).collect();
-
-        if file_indices.is_empty() {
+    /// Move selection to the previous row whose `file_index` is `Some` (i.e. a
+    /// file, not a directory). Wraps around. No-op if there are no file rows.
+    fn select_prev_file(&mut self) -> Result<()> {
+        let Some(target) = self.find_file_row(self.selected_tree_idx, false) else {
             return Ok(());
-        }
-
-        let current_pos = file_indices
-            .iter()
-            .position(|&idx| idx == self.selected_file_idx);
-
-        let new_pos = match current_pos {
-            Some(pos) => (pos + 1) % file_indices.len(),
-            None => 0,
         };
+        self.select_tree_row(target)
+    }
 
-        let new_idx = file_indices[new_pos];
-        if new_idx == self.selected_file_idx {
+    /// Move selection to the next row whose `file_index` is `Some` (i.e. a
+    /// file, not a directory). Wraps around. No-op if there are no file rows.
+    fn select_next_file(&mut self) -> Result<()> {
+        let Some(target) = self.find_file_row(self.selected_tree_idx, true) else {
+            return Ok(());
+        };
+        self.select_tree_row(target)
+    }
+
+    fn find_file_row(&self, from: usize, forward: bool) -> Option<usize> {
+        let n = self.tree_rows.len();
+        if n == 0 {
+            return None;
+        }
+        let mut idx = from;
+        for _ in 0..n {
+            idx = if forward {
+                (idx + 1) % n
+            } else if idx == 0 {
+                n - 1
+            } else {
+                idx - 1
+            };
+            if self.tree_rows[idx].file_index.is_some() {
+                return Some(idx);
+            }
+        }
+        None
+    }
+
+    fn select_tree_row(&mut self, idx: usize) -> Result<()> {
+        if idx == self.selected_tree_idx {
             return Ok(());
         }
-        self.selected_file_idx = new_idx;
+        self.selected_tree_idx = idx;
         self.reset_scroll();
-        self.ensure_selected_loaded()
+        if self.tree_rows[idx].file_index.is_some() {
+            self.ensure_selected_loaded()?;
+        }
+        Ok(())
     }
 
     fn ensure_selected_loaded(&mut self) -> Result<()> {
-        if self.files.is_empty() {
+        let Some(idx) = self.selected_file_idx() else {
             return Ok(());
-        }
-
-        let idx = self.selected_file_idx;
+        };
         let file = &mut self.files[idx];
 
         if file.old_content.is_none() || file.new_content.is_none() {
@@ -373,12 +414,81 @@ impl App {
         Ok(())
     }
 
-    fn toggle_stage(&mut self) -> Result<()> {
-        if let Some(file) = self.files.get(self.selected_file_idx) {
-            git::toggle_stage(&self.repo_root, file)?;
-            self.refresh()?;
+    fn toggle_stage_selected(&mut self) -> Result<()> {
+        let row = self.tree_rows.get(self.selected_tree_idx).cloned();
+        let Some(row) = row else { return Ok(()) };
+
+        if let Some(file_idx) = row.file_index {
+            // Single file
+            if let Some(file) = self.files.get(file_idx) {
+                git::toggle_stage(&self.repo_root, file)?;
+            }
+        } else if row.is_dir {
+            // Directory: if any file is unstageable, stage all; otherwise unstage all.
+            let any_unstageable = row.file_indices.iter().any(|&idx| {
+                self.files
+                    .get(idx)
+                    .map(|f| f.status.unstaged || f.status.untracked)
+                    .unwrap_or(false)
+            });
+            for &idx in &row.file_indices {
+                if let Some(file) = self.files.get(idx) {
+                    if any_unstageable {
+                        if file.status.unstaged || file.status.untracked {
+                            git::toggle_stage(&self.repo_root, file)?;
+                        }
+                    } else if file.status.staged {
+                        git::toggle_stage(&self.repo_root, file)?;
+                    }
+                }
+            }
         }
-        Ok(())
+        self.refresh()
+    }
+
+    fn checkout_selected(&mut self) {
+        let row = self.tree_rows.get(self.selected_tree_idx).cloned();
+        let Some(row) = row else { return };
+
+        if let Some(file_idx) = row.file_index {
+            if let Some(file) = self.files.get(file_idx) {
+                if file.status.unstaged && !file.status.untracked {
+                    self.pending_confirm = Some(PendingAction::Checkout(file_idx));
+                }
+            }
+        } else if row.is_dir {
+            let eligible: Vec<usize> = row
+                .file_indices
+                .iter()
+                .copied()
+                .filter(|&idx| {
+                    self.files
+                        .get(idx)
+                        .map(|f| f.status.unstaged && !f.status.untracked)
+                        .unwrap_or(false)
+                })
+                .collect();
+            if !eligible.is_empty() {
+                self.pending_confirm =
+                    Some(PendingAction::CheckoutDir(eligible, row.label.clone()));
+            }
+        }
+    }
+
+    fn delete_selected(&mut self) {
+        let row = self.tree_rows.get(self.selected_tree_idx).cloned();
+        let Some(row) = row else { return };
+
+        if let Some(file_idx) = row.file_index {
+            if self.files.get(file_idx).is_some() {
+                self.pending_confirm = Some(PendingAction::Delete(file_idx));
+            }
+        } else if row.is_dir && !row.file_indices.is_empty() {
+            self.pending_confirm = Some(PendingAction::DeleteDir(
+                row.file_indices.clone(),
+                row.label.clone(),
+            ));
+        }
     }
 
     fn refresh(&mut self) -> Result<()> {
@@ -389,8 +499,14 @@ impl App {
     }
 
     fn apply_refreshed_files(&mut self, files: Vec<ChangedFile>) {
-        let previous_selected_path = self.selected_file().map(|file| file.path.clone());
-        let previous_selected_idx = self.selected_file_idx;
+        // Remember what was selected so we can restore position.
+        let previous_selected = self.selected_tree_row().map(|r| {
+            let old_path = r
+                .file_index
+                .and_then(|idx| self.files.get(idx))
+                .map(|f| f.path.clone());
+            (r.is_dir, r.label.clone(), old_path)
+        });
 
         let tree = tree::build_tree(&files);
         let tree_rows = tree::flatten_tree(&tree, &files);
@@ -399,23 +515,39 @@ impl App {
         self.tree_rows = tree_rows;
         self.highlight_epoch = self.highlight_epoch.wrapping_add(1);
 
-        if self.files.is_empty() {
-            self.selected_file_idx = 0;
+        if self.tree_rows.is_empty() {
+            self.selected_tree_idx = 0;
             self.reset_scroll();
             return;
         }
 
-        let next_selected_idx = previous_selected_path
-            .as_ref()
-            .and_then(|path| self.files.iter().position(|file| &file.path == path))
-            .unwrap_or_else(|| previous_selected_idx.min(self.files.len() - 1));
+        // Try to restore selection: match by file path first, then by dir label, then clamp.
+        let restored_idx = if let Some((was_dir, ref label, ref old_path)) = previous_selected {
+            if was_dir {
+                // For directories, match by label.
+                self.tree_rows
+                    .iter()
+                    .position(|r| r.is_dir && r.label == *label)
+            } else {
+                // For files, match by file path.
+                old_path.as_ref().and_then(|path| {
+                    self.tree_rows.iter().position(|r| {
+                        r.file_index
+                            .and_then(|idx| self.files.get(idx))
+                            .map(|f| &f.path == path)
+                            .unwrap_or(false)
+                    })
+                })
+            }
+        } else {
+            None
+        };
 
-        self.selected_file_idx = next_selected_idx;
+        let new_idx =
+            restored_idx.unwrap_or_else(|| self.selected_tree_idx.min(self.tree_rows.len() - 1));
 
-        let selection_preserved = previous_selected_path
-            .as_ref()
-            .map(|path| self.files[next_selected_idx].path == *path)
-            .unwrap_or(false);
+        let selection_preserved = restored_idx.is_some();
+        self.selected_tree_idx = new_idx;
 
         if !selection_preserved {
             self.reset_scroll();
@@ -477,12 +609,7 @@ impl App {
         }
 
         let center = self.v_scroll + self.viewport_rows / 2;
-        if let Some(prev) = starts
-            .iter()
-            .copied()
-            .rev()
-            .find(|idx| *idx < center)
-        {
+        if let Some(prev) = starts.iter().copied().rev().find(|idx| *idx < center) {
             self.center_on_row(prev);
         } else if let Some(last) = starts.last().copied() {
             self.center_on_row(last);
@@ -537,7 +664,7 @@ mod tests {
             comments: crate::comments::Comments::default(),
             comment_wrap_width: 0,
             tree_h_scroll: 0,
-            selected_file_idx: 0,
+            selected_tree_idx: 0,
             v_scroll: 0,
             h_scroll: 0,
             viewport_rows: 1,
@@ -558,6 +685,7 @@ mod tests {
                 staged: false,
                 unstaged: true,
                 untracked: false,
+                deleted: false,
             },
         )
     }
@@ -597,14 +725,18 @@ mod tests {
     #[test]
     fn apply_refreshed_files_preserves_selection_by_path() {
         let mut app = app_for_test();
-        app.files = vec![changed_file("a.rs"), changed_file("b.rs")];
-        app.selected_file_idx = 1;
+        let files = vec![changed_file("a.rs"), changed_file("b.rs")];
+        let tree = crate::tree::build_tree(&files);
+        let tree_rows = crate::tree::flatten_tree(&tree, &files);
+        app.files = files;
+        app.tree_rows = tree_rows;
+        app.selected_tree_idx = 1; // b.rs
         app.v_scroll = 9;
         app.h_scroll = 4;
 
         app.apply_refreshed_files(vec![changed_file("b.rs"), changed_file("c.rs")]);
 
-        assert_eq!(app.selected_file_idx, 0);
+        assert_eq!(app.selected_file_idx(), Some(0)); // b.rs is now at index 0
         assert_eq!(app.v_scroll, 9);
         assert_eq!(app.h_scroll, 4);
     }
@@ -612,14 +744,18 @@ mod tests {
     #[test]
     fn apply_refreshed_files_resets_scroll_if_selection_replaced() {
         let mut app = app_for_test();
-        app.files = vec![changed_file("a.rs"), changed_file("b.rs")];
-        app.selected_file_idx = 1;
+        let files = vec![changed_file("a.rs"), changed_file("b.rs")];
+        let tree = crate::tree::build_tree(&files);
+        let tree_rows = crate::tree::flatten_tree(&tree, &files);
+        app.files = files;
+        app.tree_rows = tree_rows;
+        app.selected_tree_idx = 1; // b.rs
         app.v_scroll = 9;
         app.h_scroll = 4;
 
         app.apply_refreshed_files(vec![changed_file("a.rs"), changed_file("c.rs")]);
 
-        assert_eq!(app.selected_file_idx, 1);
+        // b.rs gone, selection not preserved → scroll reset
         assert_eq!(app.v_scroll, 0);
         assert_eq!(app.h_scroll, 0);
     }

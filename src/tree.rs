@@ -25,25 +25,52 @@ fn flatten_recursive(
     rows: &mut Vec<TreeRow>,
 ) {
     for child in &node.children {
-        let label = if let Some(file_idx) = child.file_index {
-            let indicator = files
-                .get(file_idx)
+        if child.is_dir {
+            let file_indices = collect_file_indices(child);
+            let label = format!("{}/", child.name);
+
+            rows.push(TreeRow {
+                depth,
+                label,
+                is_dir: true,
+                file_index: None,
+                file_indices,
+            });
+
+            flatten_recursive(child, depth + 1, files, rows);
+        } else {
+            let indicator = child
+                .file_index
+                .and_then(|idx| files.get(idx))
                 .map(|f| f.status.indicator())
                 .unwrap_or("[ ]");
-            format!("{} {}", indicator, child.name)
-        } else {
-            format!("{}/", child.name)
-        };
+            let label = format!("{} {}", indicator, child.name);
 
-        rows.push(TreeRow {
-            depth,
-            label,
-            is_dir: child.is_dir,
-            file_index: child.file_index,
-        });
+            rows.push(TreeRow {
+                depth,
+                label,
+                is_dir: false,
+                file_index: child.file_index,
+                file_indices: Vec::new(),
+            });
+        }
+    }
+}
 
+/// Collect all descendant file indices from a directory node.
+fn collect_file_indices(node: &TreeNode) -> Vec<usize> {
+    let mut indices = Vec::new();
+    collect_file_indices_recursive(node, &mut indices);
+    indices
+}
+
+fn collect_file_indices_recursive(node: &TreeNode, indices: &mut Vec<usize>) {
+    for child in &node.children {
+        if let Some(idx) = child.file_index {
+            indices.push(idx);
+        }
         if child.is_dir {
-            flatten_recursive(child, depth + 1, files, rows);
+            collect_file_indices_recursive(child, indices);
         }
     }
 }

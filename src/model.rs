@@ -7,16 +7,19 @@ pub struct FileStatus {
     pub staged: bool,
     pub unstaged: bool,
     pub untracked: bool,
+    pub deleted: bool,
 }
 
 impl FileStatus {
     pub fn indicator(&self) -> &'static str {
-        match (self.staged, self.unstaged, self.untracked) {
-            (_, _, true) => "[N]",
-            (true, true, _) => "[SU]",
-            (true, false, _) => "[S]",
-            (false, true, _) => "[U]",
-            (false, false, false) => "[ ]",
+        match (self.staged, self.unstaged, self.untracked, self.deleted) {
+            (_, _, true, _) => "[N]",
+            (true, true, _, true) => "[DU]",
+            (true, false, _, true) => "[D]",
+            (true, true, _, false) => "[SU]",
+            (true, false, _, false) => "[S]",
+            (false, true, _, _) => "[U]",
+            (false, false, false, _) => "[ ]",
         }
     }
 }
@@ -105,4 +108,6 @@ pub struct TreeRow {
     pub label: String,
     pub is_dir: bool,
     pub file_index: Option<usize>,
+    /// For directory rows: indices of all descendant files.
+    pub file_indices: Vec<usize>,
 }

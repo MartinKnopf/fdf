@@ -164,8 +164,7 @@ mod tests {
 
     #[test]
     fn inline_ranges_for_single_word_change() {
-        let (left_ranges, right_ranges) =
-            compute_inline_ranges("hello world", "hello earth");
+        let (left_ranges, right_ranges) = compute_inline_ranges("hello world", "hello earth");
         // word-level diff: "world" -> "earth" as whole tokens
         assert_eq!(left_ranges, vec![6..11]);
         assert_eq!(right_ranges, vec![6..11]);
@@ -173,16 +172,14 @@ mod tests {
 
     #[test]
     fn inline_ranges_empty_for_identical_lines() {
-        let (left_ranges, right_ranges) =
-            compute_inline_ranges("same line", "same line");
+        let (left_ranges, right_ranges) = compute_inline_ranges("same line", "same line");
         assert!(left_ranges.is_empty());
         assert!(right_ranges.is_empty());
     }
 
     #[test]
     fn inline_ranges_full_line_when_completely_different() {
-        let (left_ranges, right_ranges) =
-            compute_inline_ranges("abc", "xyz");
+        let (left_ranges, right_ranges) = compute_inline_ranges("abc", "xyz");
         assert_eq!(left_ranges, vec![0..3]);
         assert_eq!(right_ranges, vec![0..3]);
     }

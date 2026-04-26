@@ -65,6 +65,10 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Char('d') => Action::DeleteFile,
         KeyCode::Char('y') => Action::ConfirmYes,
         KeyCode::Char('?') => Action::ShowHelp,
+        KeyCode::Up => Action::ScrollUp,
+        KeyCode::Down => Action::ScrollDown,
+        KeyCode::Left => Action::ScrollLeft,
+        KeyCode::Right => Action::ScrollRight,
         KeyCode::Esc => Action::CloseOverlay,
         KeyCode::Char('q') => Action::Quit,
         _ => Action::None,
@@ -131,15 +135,15 @@ mod tests {
     }
 
     #[test]
-    fn does_not_map_arrow_keys_to_tree_navigation() {
+    fn maps_arrow_keys_to_content_scroll() {
         let left = map_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         let right = map_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
         let up = map_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         let down = map_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
-        assert!(matches!(left, Action::None));
-        assert!(matches!(right, Action::None));
-        assert!(matches!(up, Action::None));
-        assert!(matches!(down, Action::None));
+        assert!(matches!(left, Action::ScrollLeft));
+        assert!(matches!(right, Action::ScrollRight));
+        assert!(matches!(up, Action::ScrollUp));
+        assert!(matches!(down, Action::ScrollDown));
     }
 }

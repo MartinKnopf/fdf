@@ -27,7 +27,9 @@ pub fn current_branch(repo_root: &Path) -> String {
         .ok();
     out.and_then(|o| {
         if o.status.success() {
-            String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
+            String::from_utf8(o.stdout)
+                .ok()
+                .map(|s| s.trim().to_string())
         } else {
             None
         }
@@ -78,6 +80,7 @@ pub fn collect_changed_files(repo_root: &Path) -> Result<Vec<ChangedFile>> {
                     staged: false,
                     unstaged: true,
                     untracked: true,
+                    deleted: false,
                 },
             ));
             i += 1;
@@ -92,7 +95,7 @@ pub fn collect_changed_files(repo_root: &Path) -> Result<Vec<ChangedFile>> {
             }
 
             let xy = parts[1];
-            let (staged, unstaged) = parse_xy(xy);
+            let (staged, unstaged, deleted) = parse_xy(xy);
 
             let path = if text.starts_with("2 ") {
                 // For rename/copy entries in -z mode, current path is in this entry and
@@ -116,6 +119,7 @@ pub fn collect_changed_files(repo_root: &Path) -> Result<Vec<ChangedFile>> {
                         staged,
                         unstaged,
                         untracked: false,
+                        deleted,
                     },
                 ));
             }
@@ -187,14 +191,15 @@ pub fn checkout_file(repo_root: &Path, file: &ChangedFile) -> Result<()> {
     Ok(())
 }
 
-fn parse_xy(xy: &str) -> (bool, bool) {
+fn parse_xy(xy: &str) -> (bool, bool, bool) {
     let mut chars = xy.chars();
     let x = chars.next().unwrap_or('.');
     let y = chars.next().unwrap_or('.');
 
     let staged = x != '.' && x != ' ';
     let unstaged = y != '.' && y != ' ';
-    (staged, unstaged)
+    let deleted = x == 'D';
+    (staged, unstaged, deleted)
 }
 
 fn read_head_content(repo_root: &Path, path: &Path) -> Result<ContentData> {

@@ -55,10 +55,7 @@ fn compute_ranges(
     HashMap<usize, Vec<Range<usize>>>,
     HashMap<usize, Vec<Range<usize>>>,
 )> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("txt");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("txt");
 
     let mut old_file = tempfile::Builder::new()
         .suffix(&format!(".{}", ext))
@@ -101,26 +98,14 @@ fn compute_ranges(
     for chunk in &difft_output.chunks {
         for entry in chunk {
             if let Some(ref lhs) = entry.lhs {
-                let ranges: Vec<Range<usize>> = lhs
-                    .changes
-                    .iter()
-                    .map(|c| c.start..c.end)
-                    .collect();
-                left_map
-                    .entry(lhs.line_number)
-                    .or_default()
-                    .extend(ranges);
+                let ranges: Vec<Range<usize>> =
+                    lhs.changes.iter().map(|c| c.start..c.end).collect();
+                left_map.entry(lhs.line_number).or_default().extend(ranges);
             }
             if let Some(ref rhs) = entry.rhs {
-                let ranges: Vec<Range<usize>> = rhs
-                    .changes
-                    .iter()
-                    .map(|c| c.start..c.end)
-                    .collect();
-                right_map
-                    .entry(rhs.line_number)
-                    .or_default()
-                    .extend(ranges);
+                let ranges: Vec<Range<usize>> =
+                    rhs.changes.iter().map(|c| c.start..c.end).collect();
+                right_map.entry(rhs.line_number).or_default().extend(ranges);
             }
         }
     }

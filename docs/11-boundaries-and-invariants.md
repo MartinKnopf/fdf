@@ -1,4 +1,4 @@
-Last Updated: 2026-02-23
+Last Updated: 2026-04-10
 Status: active
 Audience: both
 Update Trigger: Layering changes, new invariants, enforcement changes
@@ -19,9 +19,9 @@ Source of Truth: src/, docs/10-architecture-overview.md, docs/30-quality-gates.m
 - Forbidden: `comments` importing `ui`, `app`, or `git`
 
 ## Invariants
-1. Invariant: The tool does not mutate git state.
-   - Rationale: Product contract is read-only diff inspection.
-   - Enforcement: PR review checklist + grep for mutating git commands in `src/git.rs`.
+1. Invariant: Git mutations are limited to explicit user-initiated actions (stage/unstage, checkout, delete) on individual files or directories. No implicit or background git writes.
+   - Rationale: Product contract supports controlled staging/checkout/delete workflows, both per-file and per-directory.
+   - Enforcement: PR review checklist + grep for mutating git commands in `src/git.rs`. Directory actions reuse the same per-file git primitives (`toggle_stage`, `checkout_file`).
    - Owner: ac1ifci
    - Severity: critical
 2. Invariant: All keybindings map through `src/input.rs` into `Action` before state mutation.

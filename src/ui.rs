@@ -13,7 +13,7 @@ use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 use crate::app::{App, PendingAction};
 use crate::comments::CommentRow;
-use crate::model::{AlignedRow, RowKind};
+use crate::model::{AlignedRow, RowKind, TreeRow};
 
 #[derive(Debug)]
 struct HighlightedRow {
@@ -99,12 +99,43 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .iter()
         .map(|row| {
             let indent = "  ".repeat(row.depth);
-            let pending_file_idx = match app.pending_confirm {
-                Some(PendingAction::Checkout(idx) | PendingAction::Delete(idx)) => Some(idx),
+            let pending_file_idx = match &app.pending_confirm {
+                Some(PendingAction::Checkout(idx) | PendingAction::Delete(idx)) => Some(*idx),
+                Some(PendingAction::CheckoutDir(indices, _)) => {
+                    if row.is_dir {
+                        // Highlight dir rows that are pending confirmation
+                        let is_dir_pending = row.file_indices.iter().any(|fi| indices.contains(fi));
+                        if is_dir_pending {
+                            Some(usize::MAX)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                Some(PendingAction::DeleteDir(indices, _)) => {
+                    if row.is_dir {
+                        let is_dir_pending = row.file_indices.iter().any(|fi| indices.contains(fi));
+                        if is_dir_pending {
+                            Some(usize::MAX)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
                 None => None,
             };
-            let is_pending = row.file_index == pending_file_idx && !row.is_dir;
-            let label = if is_pending {
+            let is_pending = if row.is_dir {
+                pending_file_idx == Some(usize::MAX)
+            } else {
+                row.file_index == pending_file_idx && !row.is_dir
+            };
+            let label = if is_pending && row.is_dir {
+                format!("{}[y] {}", indent, row.label)
+            } else if is_pending {
                 // Replace the status indicator with [y]
                 let name_part = row.label.split("] ").last().unwrap_or(&row.label);
                 format!("{}[y] {}", indent, name_part)
@@ -209,7 +240,7 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| file.path.to_string_lossy().into_owned());
 
-        let is_selected = file_idx == app.selected_file_idx;
+        let is_selected = app.selected_file_idx() == Some(file_idx);
         // Selected: "[name]", others: "name"; space separator between tabs
         let label = if is_selected {
             format!("[{}]", filename)
@@ -241,9 +272,9 @@ fn render_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             spans.push(Span::styled(" ", Style::default()));
         }
 
-        let pending_file_idx = match app.pending_confirm {
-            Some(PendingAction::Checkout(idx) | PendingAction::Delete(idx)) => Some(idx),
-            None => None,
+        let pending_file_idx = match &app.pending_confirm {
+            Some(PendingAction::Checkout(idx) | PendingAction::Delete(idx)) => Some(*idx),
+            _ => None,
         };
         let is_pending = pending_file_idx == Some(file_idx);
         let color = if is_pending {
@@ -288,9 +319,9 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
         ("Ctrl-d / Ctrl-u", "Page down / up"),
         ("g g / G", "Go to top / bottom"),
         ("n / N", "Next / previous change"),
-        ("Space", "Stage / unstage file"),
-        ("!", "Checkout file (discard changes)"),
-        ("d", "Delete file"),
+        ("Space", "Stage / unstage file or directory"),
+        ("!", "Checkout file/dir (discard changes)"),
+        ("d", "Delete file or directory"),
         ("C", "Git commit"),
         ("p", "Git pull"),
         ("P", "Git push"),
@@ -322,7 +353,12 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
 
     let x = area.width.saturating_sub(content_width) / 2;
     let y = area.height.saturating_sub(content_height) / 2;
-    let overlay = Rect::new(x, y, content_width.min(area.width), content_height.min(area.height));
+    let overlay = Rect::new(
+        x,
+        y,
+        content_width.min(area.width),
+        content_height.min(area.height),
+    );
 
     frame.render_widget(Clear, overlay);
     let block = Block::default()
@@ -366,9 +402,18 @@ fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
 
     let selected_file = app.selected_file();
-    let title = selected_file
-        .map(|file| file.path.to_string_lossy().to_string())
-        .unwrap_or_else(|| "No changes".to_string());
+    let selected_tree_row = app.selected_tree_row();
+    let is_dir_selected = selected_tree_row.map(|r| r.is_dir).unwrap_or(false);
+
+    let title = if is_dir_selected {
+        selected_tree_row
+            .map(|r| r.label.clone())
+            .unwrap_or_else(|| "Directory".to_string())
+    } else {
+        selected_file
+            .map(|file| file.path.to_string_lossy().to_string())
+            .unwrap_or_else(|| "No changes".to_string())
+    };
 
     let syntax = selected_file
         .map(|file| syntax_for_path(&file.path, syntax_set()))
@@ -381,7 +426,10 @@ fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
         None
     };
 
-    let (left_lines, right_lines, comment_lines) = if let Some(file) = selected_file {
+    let (left_lines, right_lines, comment_lines) = if is_dir_selected {
+        let dir_summary = build_dir_summary(app, selected_tree_row.unwrap());
+        (dir_summary.clone(), dir_summary, Vec::new())
+    } else if let Some(file) = selected_file {
         if let Some(rows) = rows_to_render {
             with_highlighted_rows_for_file(
                 &file.path,
@@ -666,10 +714,7 @@ fn styled_spans(text: &str, style: Style) -> Vec<Span<'static>> {
 
 /// Create a single span with the given foreground color.
 fn plain_spans(text: &str, color: Color) -> Vec<Span<'static>> {
-    vec![Span::styled(
-        text.to_string(),
-        Style::default().fg(color),
-    )]
+    vec![Span::styled(text.to_string(), Style::default().fg(color))]
 }
 
 /// Build spans for a diff line without syntax highlighting.
@@ -685,18 +730,12 @@ fn apply_inline_highlights_plain(
 
     for range in changed_ranges {
         if range.start > pos {
-            let chunk: String = text
-                .get(pos..range.start)
-                .unwrap_or("")
-                .to_string();
+            let chunk: String = text.get(pos..range.start).unwrap_or("").to_string();
             if !chunk.is_empty() {
                 result.push(Span::styled(chunk, Style::default().fg(base_color)));
             }
         }
-        let chunk: String = text
-            .get(range.start..range.end)
-            .unwrap_or("")
-            .to_string();
+        let chunk: String = text.get(range.start..range.end).unwrap_or("").to_string();
         if !chunk.is_empty() {
             result.push(Span::styled(chunk, highlight_style));
         }
@@ -802,7 +841,8 @@ fn trim_trailing_newline(spans: &mut Vec<Span<'static>>) {
 
 fn syntax_set() -> &'static SyntaxSet {
     static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SYNTAX_SET.get_or_init(|| build_syntax_set().unwrap_or_else(|_| SyntaxSet::load_defaults_newlines()))
+    SYNTAX_SET
+        .get_or_init(|| build_syntax_set().unwrap_or_else(|_| SyntaxSet::load_defaults_newlines()))
 }
 
 /// Build a SyntaxSet with updated bundled syntax definitions overlaying the defaults.
@@ -840,26 +880,23 @@ fn load_theme_by_name(name: &str) -> Result<Theme, String> {
 
     // Fall back to syntect built-in themes
     let themes = ThemeSet::load_defaults();
-    themes
-        .themes
-        .get(name)
-        .cloned()
-        .ok_or_else(|| {
-            let mut available: Vec<&str> = themes.themes.keys().map(|k| k.as_str()).collect();
-            available.extend(BUNDLED_THEMES.iter().map(|(name, _)| *name));
-            available.sort();
-            format!(
-                "Unknown syntax theme '{}'. Available: {}",
-                name,
-                available.join(", ")
-            )
-        })
+    themes.themes.get(name).cloned().ok_or_else(|| {
+        let mut available: Vec<&str> = themes.themes.keys().map(|k| k.as_str()).collect();
+        available.extend(BUNDLED_THEMES.iter().map(|(name, _)| *name));
+        available.sort();
+        format!(
+            "Unknown syntax theme '{}'. Available: {}",
+            name,
+            available.join(", ")
+        )
+    })
 }
 
 /// Themes bundled as embedded .tmTheme data.
-const BUNDLED_THEMES: &[(&str, &[u8])] = &[
-    ("Dracula", include_bytes!("../assets/themes/Dracula.tmTheme")),
-];
+const BUNDLED_THEMES: &[(&str, &[u8])] = &[(
+    "Dracula",
+    include_bytes!("../assets/themes/Dracula.tmTheme"),
+)];
 
 fn load_bundled_theme(name: &str) -> Option<Theme> {
     BUNDLED_THEMES
@@ -944,9 +981,82 @@ fn row_style(_kind: RowKind) -> Style {
 }
 
 fn selected_tree_row_idx(app: &App) -> Option<usize> {
-    app.tree_rows
-        .iter()
-        .position(|r| r.file_index == Some(app.selected_file_idx))
+    if app.tree_rows.is_empty() {
+        None
+    } else {
+        Some(app.selected_tree_idx)
+    }
+}
+
+fn build_dir_summary(app: &App, row: &TreeRow) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let dir_style = Style::default()
+        .fg(Color::Blue)
+        .add_modifier(Modifier::BOLD);
+    let header_style = Style::default().fg(Color::Yellow);
+    let file_style = Style::default().fg(Color::White);
+
+    lines.push(Line::from(Span::styled(
+        format!("  {}", row.label),
+        dir_style,
+    )));
+    lines.push(Line::from(""));
+
+    let mut staged = 0usize;
+    let mut unstaged = 0usize;
+    let mut untracked = 0usize;
+
+    for &idx in &row.file_indices {
+        if let Some(file) = app.files.get(idx) {
+            if file.status.staged {
+                staged += 1;
+            }
+            if file.status.unstaged {
+                unstaged += 1;
+            }
+            if file.status.untracked {
+                untracked += 1;
+            }
+        }
+    }
+
+    lines.push(Line::from(Span::styled(
+        format!("  {} file(s)", row.file_indices.len()),
+        header_style,
+    )));
+    if staged > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  {} staged", staged),
+            Style::default().fg(Color::Green),
+        )));
+    }
+    if unstaged > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  {} unstaged", unstaged),
+            Style::default().fg(Color::White),
+        )));
+    }
+    if untracked > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  {} untracked", untracked),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("  Files:", header_style)));
+
+    for &idx in &row.file_indices {
+        if let Some(file) = app.files.get(idx) {
+            let indicator = file.status.indicator();
+            lines.push(Line::from(Span::styled(
+                format!("  {} {}", indicator, file.path.to_string_lossy()),
+                file_style,
+            )));
+        }
+    }
+
+    lines
 }
 
 fn render_scrollbar(
