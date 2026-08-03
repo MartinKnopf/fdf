@@ -125,6 +125,7 @@ KEYBINDINGS
     n / N           Jump to next / previous change block
     g g / G         Jump to top / bottom
     Space           Stage / unstage selected file
+    A               Stage / unstage all changes
     !               Checkout file (discard changes, y to confirm)
     d               Delete file (y to confirm)
     C               Run git commit (suspends TUI)
@@ -206,6 +207,7 @@ fn run_shell_command(
         .current_dir(&app.repo_root)
         .status();
 
+    let failed = !matches!(&status, Ok(s) if s.success());
     match &status {
         Ok(s) if !s.success() => {
             eprintln!("\nCommand exited with {}", s);
@@ -216,7 +218,9 @@ fn run_shell_command(
         _ => {}
     }
 
-    if cmd.wait_for_key {
+    // Always pause on failure so output (e.g. a failed pre-commit hook) stays
+    // visible instead of being wiped by the TUI redraw.
+    if cmd.wait_for_key || failed {
         eprintln!("\nPress Enter or q to return to fdf...");
         wait_for_enter_or_q();
     }

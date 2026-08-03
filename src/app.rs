@@ -171,6 +171,7 @@ impl App {
             }
             Action::Refresh => self.refresh()?,
             Action::ToggleStage => self.toggle_stage_selected()?,
+            Action::ToggleStageAll => self.toggle_stage_all()?,
 
             Action::GitCommit => {
                 self.shell_command = Some(ShellCommand {
@@ -442,6 +443,20 @@ impl App {
                     }
                 }
             }
+        }
+        self.refresh()
+    }
+
+    fn toggle_stage_all(&mut self) -> Result<()> {
+        // If anything is unstaged or untracked, stage everything; otherwise unstage everything.
+        let any_unstageable = self
+            .files
+            .iter()
+            .any(|f| f.status.unstaged || f.status.untracked);
+        if any_unstageable {
+            git::stage_all(&self.repo_root)?;
+        } else if self.files.iter().any(|f| f.status.staged) {
+            git::unstage_all(&self.repo_root)?;
         }
         self.refresh()
     }

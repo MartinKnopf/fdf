@@ -320,6 +320,7 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
         ("g g / G", "Go to top / bottom"),
         ("n / N", "Next / previous change"),
         ("Space", "Stage / unstage file or directory"),
+        ("A", "Stage / unstage all changes"),
         ("!", "Checkout file/dir (discard changes)"),
         ("d", "Delete file or directory"),
         ("C", "Git commit"),

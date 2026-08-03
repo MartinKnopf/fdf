@@ -176,6 +176,34 @@ pub fn toggle_stage(repo_root: &Path, file: &ChangedFile) -> Result<()> {
     Ok(())
 }
 
+/// Stage all changes in the working tree (modifications, additions, deletions).
+pub fn stage_all(repo_root: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to run git add -A")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(anyhow!("git add -A failed: {}", stderr));
+    }
+    Ok(())
+}
+
+/// Unstage all changes (git reset).
+pub fn unstage_all(repo_root: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["reset"])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to run git reset")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(anyhow!("git reset failed: {}", stderr));
+    }
+    Ok(())
+}
+
 /// Discard unstaged changes by checking out the file from the index.
 pub fn checkout_file(repo_root: &Path, file: &ChangedFile) -> Result<()> {
     let path_str = file.path.to_string_lossy();
