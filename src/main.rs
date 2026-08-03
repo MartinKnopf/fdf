@@ -133,6 +133,7 @@ KEYBINDINGS
     P               Run git push (suspends TUI, wait for key)
     b               Toggle file tree panel
     c               Toggle comments panel (requires -c)
+    w               Toggle line wrapping
     R               Refresh diff from disk
     ?               Show keybindings help
     Esc             Close help overlay

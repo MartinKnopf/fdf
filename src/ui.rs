@@ -212,7 +212,16 @@ fn render_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let hint = " ? for help ";
     let hint_span = Span::styled(hint, Style::default().fg(Color::DarkGray));
 
-    let line = Line::from(vec![branch_span, file_span, hint_span]);
+    let mut spans = vec![branch_span, file_span];
+    if app.wrap {
+        spans.push(Span::styled(
+            " WRAP ",
+            Style::default().fg(Color::Black).bg(Color::Yellow),
+        ));
+    }
+    spans.push(hint_span);
+
+    let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(Color::Rgb(40, 42, 54)));
     frame.render_widget(bar, area);
 }
@@ -328,6 +337,7 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
         ("P", "Git push"),
         ("b", "Toggle file tree"),
         ("c", "Toggle comments"),
+        ("w", "Toggle line wrapping"),
         ("R", "Refresh"),
         ("?", "Show this help"),
         ("Esc", "Close this help"),
@@ -370,7 +380,7 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
     frame.render_widget(help, overlay);
 }
 
-fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_diff(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     // Split: 1 row for tab bar, rest for diff content
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -401,6 +411,11 @@ fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ])
             .split(area)
     };
+
+    // Report the pane's usable text width so scroll bounds know how tall a
+    // wrapped row renders. Must match `content_width` in `build_visible_rows`.
+    app.set_diff_content_width(right_chunks[0].width.saturating_sub(8) as usize);
+    let app = &*app;
 
     let selected_file = app.selected_file();
     let selected_tree_row = app.selected_tree_row();
@@ -438,21 +453,17 @@ fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 syntax,
                 app.highlight_epoch,
                 |highlighted_rows| {
-                    let (l, r) = build_visible_rows(
+                    let (l, r, row_heights) = build_visible_rows(
                         rows,
                         highlighted_rows,
                         app.v_scroll,
                         app.h_scroll,
                         right_chunks[0].width as usize,
                         right_chunks[0].height as usize,
+                        app.wrap,
                     );
                     let c = if app.show_comments {
-                        build_visible_comment_rows(
-                            comment_rows,
-                            app.v_scroll,
-                            right_chunks[2].width as usize,
-                            right_chunks[2].height as usize,
-                        )
+                        build_visible_comment_rows(comment_rows, app.v_scroll, &row_heights)
                     } else {
                         Vec::new()
                     };
@@ -513,6 +524,11 @@ fn render_diff(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 }
 
+/// Build the visible diff lines for both panes.
+///
+/// Returns the left lines, the right lines, and how many terminal lines each
+/// rendered logical row consumed (always 1 unless wrapping is on). The heights
+/// let the comment pane pad itself so all three columns stay aligned.
 fn build_visible_rows(
     rows: &[AlignedRow],
     highlighted_rows: &[HighlightedRow],
@@ -520,67 +536,166 @@ fn build_visible_rows(
     h_scroll: usize,
     pane_width: usize,
     pane_height: usize,
-) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    wrap: bool,
+) -> (Vec<Line<'static>>, Vec<Line<'static>>, Vec<usize>) {
     let viewport_height = pane_height.saturating_sub(2).max(1);
-    let max_visible = rows.len().saturating_sub(v_scroll).min(viewport_height);
-    let end_idx = (v_scroll + max_visible)
-        .min(rows.len())
-        .min(highlighted_rows.len());
-    let mut left = Vec::with_capacity(max_visible);
-    let mut right = Vec::with_capacity(max_visible);
+    let end_idx = rows.len().min(highlighted_rows.len());
+    let mut left = Vec::with_capacity(viewport_height);
+    let mut right = Vec::with_capacity(viewport_height);
+    let mut row_heights = Vec::with_capacity(viewport_height);
+    let mut used_height = 0usize;
 
     let content_width = pane_width.saturating_sub(8);
 
     for idx in v_scroll..end_idx {
+        if used_height >= viewport_height {
+            break;
+        }
         let row = &rows[idx];
         let highlighted = &highlighted_rows[idx];
 
-        left.push(styled_diff_line(
-            row.left_line_no,
-            row.kind,
-            &highlighted.left,
-            h_scroll,
-            content_width,
-        ));
-        right.push(styled_diff_line(
-            row.right_line_no,
-            row.kind,
-            &highlighted.right,
-            h_scroll,
-            content_width,
-        ));
+        if !wrap {
+            left.push(styled_diff_line(
+                row.left_line_no,
+                row.kind,
+                &highlighted.left,
+                h_scroll,
+                content_width,
+            ));
+            right.push(styled_diff_line(
+                row.right_line_no,
+                row.kind,
+                &highlighted.right,
+                h_scroll,
+                content_width,
+            ));
+            row_heights.push(1);
+            used_height += 1;
+            continue;
+        }
+
+        // Both panes emit the same number of lines for a logical row — the
+        // shorter side is padded — so left/right stay aligned.
+        let left_segments = wrap_spans(&highlighted.left, content_width);
+        let right_segments = wrap_spans(&highlighted.right, content_width);
+        let row_height = left_segments
+            .len()
+            .max(right_segments.len())
+            .min(viewport_height - used_height);
+
+        for seg_idx in 0..row_height {
+            left.push(wrapped_diff_line(
+                row.left_line_no,
+                seg_idx,
+                left_segments.get(seg_idx).map(|s| s.as_slice()),
+            ));
+            right.push(wrapped_diff_line(
+                row.right_line_no,
+                seg_idx,
+                right_segments.get(seg_idx).map(|s| s.as_slice()),
+            ));
+        }
+
+        row_heights.push(row_height);
+        used_height += row_height;
     }
 
-    (left, right)
+    (left, right, row_heights)
 }
 
 fn build_visible_comment_rows(
     comment_rows: Option<&Vec<CommentRow>>,
     v_scroll: usize,
-    _pane_width: usize,
-    pane_height: usize,
+    row_heights: &[usize],
 ) -> Vec<Line<'static>> {
-    let viewport_height = pane_height.saturating_sub(2).max(1);
     let comment_style = Style::default().fg(Color::Rgb(180, 180, 140));
+    let total_height: usize = row_heights.iter().sum();
 
     let Some(rows) = comment_rows else {
-        return vec![Line::from(""); viewport_height];
+        return vec![Line::from(""); total_height];
     };
 
-    let max_visible = rows.len().saturating_sub(v_scroll).min(viewport_height);
-    let end_idx = (v_scroll + max_visible).min(rows.len());
-    let mut lines = Vec::with_capacity(max_visible);
+    let mut lines = Vec::with_capacity(total_height);
 
-    for idx in v_scroll..end_idx {
-        let text = &rows[idx].text;
-        if text.is_empty() {
+    for (offset, &height) in row_heights.iter().enumerate() {
+        if height == 0 {
+            continue;
+        }
+        match rows.get(v_scroll + offset) {
+            Some(row) if !row.text.is_empty() => {
+                lines.push(Line::from(Span::styled(row.text.clone(), comment_style)));
+            }
+            _ => lines.push(Line::from("")),
+        }
+        // Pad out the remainder of a wrapped diff row.
+        for _ in 1..height {
             lines.push(Line::from(""));
-        } else {
-            lines.push(Line::from(Span::styled(text.clone(), comment_style)));
         }
     }
 
     lines
+}
+
+/// Split styled spans into chunks of at most `width` characters, preserving
+/// each span's style across chunk boundaries. Always returns at least one
+/// (possibly empty) chunk.
+fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> {
+    if width == 0 {
+        return vec![Vec::new()];
+    }
+
+    let mut chunks: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
+    let mut used = 0usize;
+
+    for span in spans {
+        let chars: Vec<char> = span.content.chars().collect();
+        let mut start = 0usize;
+        while start < chars.len() {
+            let take = (width - used).min(chars.len() - start);
+            let chunk: String = chars[start..start + take].iter().collect();
+            current.push(Span::styled(chunk, span.style));
+            used += take;
+            start += take;
+            if used == width {
+                chunks.push(std::mem::take(&mut current));
+                used = 0;
+            }
+        }
+    }
+
+    if !current.is_empty() || chunks.is_empty() {
+        chunks.push(current);
+    }
+
+    chunks
+}
+
+/// Render one terminal line of a (possibly wrapped) diff row. `segment_idx` is
+/// the index of this line within the wrapped row; `None` content means this
+/// side is padding for a row that wrapped further on the other side.
+fn wrapped_diff_line(
+    line_no: Option<usize>,
+    segment_idx: usize,
+    segment: Option<&[Span<'static>]>,
+) -> Line<'static> {
+    let gutter = if segment_idx == 0 {
+        let number = line_no
+            .map(|n| format!("{:>4}", n))
+            .unwrap_or_else(|| "    ".to_string());
+        Span::styled(format!("{} ", number), Style::default())
+    } else if segment.is_some() {
+        Span::styled("   ↳ ".to_string(), Style::default().fg(DIFF_DIM))
+    } else {
+        Span::styled("     ".to_string(), Style::default())
+    };
+
+    let mut spans = vec![gutter];
+    if let Some(segment) = segment {
+        spans.extend(segment.iter().cloned());
+    }
+
+    Line::from(spans)
 }
 
 fn styled_diff_line(
@@ -1117,9 +1232,98 @@ mod tests {
     use crate::model::{AlignedRow, RowKind};
 
     use super::{
-        clip_spans, highlight_line, syntax_for_path, syntax_set, syntax_theme,
-        syntect_to_ratatui_style, with_highlighted_rows_for_file,
+        build_visible_rows, clip_spans, highlight_line, syntax_for_path, syntax_set, syntax_theme,
+        syntect_to_ratatui_style, with_highlighted_rows_for_file, wrap_spans, HighlightedRow,
     };
+
+    fn row(left: &str, right: &str) -> AlignedRow {
+        AlignedRow {
+            left_line_no: Some(1),
+            right_line_no: Some(1),
+            left_text: left.to_string(),
+            right_text: right.to_string(),
+            kind: RowKind::Equal,
+            left_changed_ranges: Vec::new(),
+            right_changed_ranges: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn wrap_spans_splits_at_width_and_keeps_styles() {
+        let spans = vec![
+            Span::styled("abcd".to_string(), Style::default().fg(Color::Red)),
+            Span::styled("efghi".to_string(), Style::default().fg(Color::Blue)),
+        ];
+
+        let chunks = wrap_spans(&spans, 3);
+        let texts: Vec<String> = chunks
+            .iter()
+            .map(|c| c.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+
+        assert_eq!(texts, vec!["abc", "def", "ghi"]);
+        assert_eq!(chunks[1][0].style.fg, Some(Color::Red)); // "d"
+        assert_eq!(chunks[1][1].style.fg, Some(Color::Blue)); // "ef"
+    }
+
+    #[test]
+    fn wrap_spans_returns_one_empty_chunk_for_empty_input() {
+        assert_eq!(wrap_spans(&[], 10).len(), 1);
+        assert_eq!(wrap_spans(&[Span::raw("")], 10).len(), 1);
+    }
+
+    #[test]
+    fn wrapped_panes_emit_equal_line_counts_per_row() {
+        // Left wraps to 3 lines at width 4, right fits on 1 — both panes must
+        // still emit 3 lines so the columns stay aligned.
+        let rows = vec![row("aaaaaaaaaaaa", "bb")];
+        let highlighted = vec![HighlightedRow {
+            left: vec![Span::raw("aaaaaaaaaaaa")],
+            right: vec![Span::raw("bb")],
+        }];
+
+        let (left, right, heights) = build_visible_rows(&rows, &highlighted, 0, 0, 12, 20, true);
+
+        assert_eq!(heights, vec![3]);
+        assert_eq!(left.len(), 3);
+        assert_eq!(right.len(), 3);
+    }
+
+    #[test]
+    fn wrapped_rows_are_truncated_at_the_viewport_bottom() {
+        let rows = vec![row("aaaaaaaaaaaa", "aaaaaaaaaaaa")];
+        let highlighted = vec![HighlightedRow {
+            left: vec![Span::raw("aaaaaaaaaaaa")],
+            right: vec![Span::raw("aaaaaaaaaaaa")],
+        }];
+
+        // pane_height 4 → viewport of 2 lines, but the row wraps to 3.
+        let (left, right, heights) = build_visible_rows(&rows, &highlighted, 0, 0, 12, 4, true);
+
+        assert_eq!(heights, vec![2]);
+        assert_eq!(left.len(), 2);
+        assert_eq!(right.len(), 2);
+    }
+
+    #[test]
+    fn unwrapped_rows_report_unit_heights() {
+        let rows = vec![row("a", "a"), row("b", "b")];
+        let highlighted = vec![
+            HighlightedRow {
+                left: vec![Span::raw("a")],
+                right: vec![Span::raw("a")],
+            },
+            HighlightedRow {
+                left: vec![Span::raw("b")],
+                right: vec![Span::raw("b")],
+            },
+        ];
+
+        let (left, _right, heights) = build_visible_rows(&rows, &highlighted, 0, 0, 40, 20, false);
+
+        assert_eq!(heights, vec![1, 1]);
+        assert_eq!(left.len(), 2);
+    }
 
     #[test]
     fn resolves_rust_syntax_by_extension() {

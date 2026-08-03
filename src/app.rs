@@ -29,8 +29,12 @@ pub struct App {
     pub tree_rows: Vec<TreeRow>,
     pub show_tree: bool,
     pub show_comments: bool,
+    /// When true, long diff lines wrap instead of being clipped at the pane edge.
+    pub wrap: bool,
     pub comments: Comments,
     pub comment_wrap_width: usize,
+    /// Usable text width of one diff pane, reported by the UI each frame.
+    pub diff_content_width: usize,
     pub tree_h_scroll: usize,
     pub selected_tree_idx: usize,
     pub v_scroll: usize,
@@ -61,8 +65,10 @@ impl App {
             tree_rows,
             show_tree: true,
             show_comments: false,
+            wrap: false,
             comments,
             comment_wrap_width: 0,
+            diff_content_width: 0,
             tree_h_scroll: 0,
             selected_tree_idx: 0,
             v_scroll: 0,
@@ -169,6 +175,13 @@ impl App {
                     self.show_comments = !self.show_comments;
                 }
             }
+            Action::ToggleWrap => {
+                self.wrap = !self.wrap;
+                // Horizontal scrolling is meaningless once lines wrap.
+                if self.wrap {
+                    self.h_scroll = 0;
+                }
+            }
             Action::Refresh => self.refresh()?,
             Action::ToggleStage => self.toggle_stage_selected()?,
             Action::ToggleStageAll => self.toggle_stage_all()?,
@@ -214,10 +227,14 @@ impl App {
             Action::PageDown => self.page_down(),
             Action::PageUp => self.page_up(),
             Action::ScrollLeft => {
-                self.h_scroll = self.h_scroll.saturating_sub(1);
+                if !self.wrap {
+                    self.h_scroll = self.h_scroll.saturating_sub(1);
+                }
             }
             Action::ScrollRight => {
-                self.h_scroll = self.h_scroll.saturating_add(1);
+                if !self.wrap {
+                    self.h_scroll = self.h_scroll.saturating_add(1);
+                }
             }
             Action::GoBottom => self.go_bottom(),
             Action::NextChange => self.jump_next_change(),
@@ -268,6 +285,12 @@ impl App {
     pub fn set_viewport_rows(&mut self, rows: usize) {
         self.viewport_rows = rows.max(1);
         self.clamp_scroll();
+    }
+
+    /// Called by UI each frame to communicate the usable text width of a diff
+    /// pane, so scroll bounds can account for wrapped row heights.
+    pub fn set_diff_content_width(&mut self, width: usize) {
+        self.diff_content_width = width;
     }
 
     /// Called by UI each frame to communicate the comment pane content width.
@@ -636,10 +659,34 @@ impl App {
         self.v_scroll = self.v_scroll.min(max_scroll);
     }
 
+    /// Largest scroll offset that still fills the viewport, so the bottom of the
+    /// file is reachable but never scrolls past.
     fn max_v_scroll(&self) -> usize {
-        let total_rows = self.selected_rows().map(|r| r.len()).unwrap_or(0);
-        total_rows.saturating_sub(self.viewport_rows)
+        let Some(rows) = self.selected_rows() else {
+            return 0;
+        };
+
+        if !self.wrap || self.diff_content_width == 0 {
+            return rows.len().saturating_sub(self.viewport_rows);
+        }
+
+        // A wrapped row occupies several terminal lines, so walk back from the
+        // last row until a screenful of *rendered* lines is accounted for.
+        let mut idx = rows.len();
+        let mut used = 0usize;
+        while idx > 0 && used < self.viewport_rows {
+            idx -= 1;
+            used += wrapped_row_height(&rows[idx], self.diff_content_width);
+        }
+        idx
     }
+}
+
+/// Terminal lines a row occupies when wrapped to `width`. Both panes render the
+/// same height for a row, so the taller side wins.
+fn wrapped_row_height(row: &AlignedRow, width: usize) -> usize {
+    let height = |text: &str| text.chars().count().div_ceil(width).max(1);
+    height(&row.left_text).max(height(&row.right_text))
 }
 
 fn change_block_starts(rows: &[AlignedRow]) -> Vec<usize> {
@@ -676,8 +723,10 @@ mod tests {
             tree_rows: Vec::new(),
             show_tree: true,
             show_comments: false,
+            wrap: false,
             comments: crate::comments::Comments::default(),
             comment_wrap_width: 0,
+            diff_content_width: 0,
             tree_h_scroll: 0,
             selected_tree_idx: 0,
             v_scroll: 0,
@@ -719,6 +768,28 @@ mod tests {
     }
 
     #[test]
+    fn toggle_wrap_flips_flag_and_disables_horizontal_scroll() {
+        let mut app = app_for_test();
+        app.h_scroll = 7;
+
+        app.on_action(Action::ToggleWrap)
+            .expect("toggle wrap should succeed");
+        assert!(app.wrap);
+        assert_eq!(app.h_scroll, 0, "wrapping resets horizontal scroll");
+
+        app.on_action(Action::ScrollRight)
+            .expect("scroll right should succeed");
+        assert_eq!(app.h_scroll, 0, "horizontal scroll is inert while wrapping");
+
+        app.on_action(Action::ToggleWrap)
+            .expect("toggle wrap should succeed");
+        assert!(!app.wrap);
+        app.on_action(Action::ScrollRight)
+            .expect("scroll right should succeed");
+        assert_eq!(app.h_scroll, 1);
+    }
+
+    #[test]
     fn tree_horizontal_scroll_actions_adjust_tree_offset() {
         let mut app = app_for_test();
 
@@ -735,6 +806,55 @@ mod tests {
         app.on_action(Action::TreeScrollLeft)
             .expect("left tree scroll should saturate at zero");
         assert_eq!(app.tree_h_scroll, 0);
+    }
+
+    /// One file whose rows all have `text` on both sides, selected and loaded.
+    fn app_with_rows(text: &str, count: usize) -> App {
+        let mut app = app_for_test();
+        let mut file = changed_file("a.rs");
+        file.aligned_rows = Some(
+            (0..count)
+                .map(|i| crate::model::AlignedRow {
+                    left_line_no: Some(i + 1),
+                    right_line_no: Some(i + 1),
+                    left_text: text.to_string(),
+                    right_text: text.to_string(),
+                    kind: crate::model::RowKind::Equal,
+                    left_changed_ranges: Vec::new(),
+                    right_changed_ranges: Vec::new(),
+                })
+                .collect(),
+        );
+        let files = vec![file];
+        let tree = crate::tree::build_tree(&files);
+        app.tree_rows = crate::tree::flatten_tree(&tree, &files);
+        app.files = files;
+        app
+    }
+
+    #[test]
+    fn go_bottom_accounts_for_wrapped_row_heights() {
+        // 20 rows of 30 chars wrapping at width 10 → 3 lines each.
+        let mut app = app_with_rows(&"x".repeat(30), 20);
+        app.viewport_rows = 12;
+        app.diff_content_width = 10;
+        app.wrap = true;
+
+        app.on_action(Action::GoBottom).expect("G should succeed");
+
+        // 12 viewport lines / 3 lines per row → the last 4 rows fill the screen.
+        assert_eq!(app.v_scroll, 16);
+    }
+
+    #[test]
+    fn go_bottom_without_wrapping_uses_row_count() {
+        let mut app = app_with_rows(&"x".repeat(30), 20);
+        app.viewport_rows = 12;
+        app.diff_content_width = 10;
+
+        app.on_action(Action::GoBottom).expect("G should succeed");
+
+        assert_eq!(app.v_scroll, 8);
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub enum Action {
     NextChange,
     PrevChange,
     ToggleComments,
+    ToggleWrap,
     ToggleStage,
     ToggleStageAll,
     GitCommit,
@@ -53,6 +54,7 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Char('L') => Action::ScrollRight,
         KeyCode::Char('b') => Action::ToggleTree,
         KeyCode::Char('c') => Action::ToggleComments,
+        KeyCode::Char('w') => Action::ToggleWrap,
         KeyCode::Char('C') => Action::GitCommit,
         KeyCode::Char('p') => Action::GitPull,
         KeyCode::Char('P') => Action::GitPush,
@@ -86,6 +88,12 @@ mod tests {
     fn maps_b_to_toggle_tree() {
         let action = map_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
         assert!(matches!(action, Action::ToggleTree));
+    }
+
+    #[test]
+    fn maps_w_to_toggle_wrap() {
+        let action = map_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
+        assert!(matches!(action, Action::ToggleWrap));
     }
 
     #[test]
