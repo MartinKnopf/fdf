@@ -47,10 +47,18 @@ pub struct App {
     pub should_quit: bool,
     pub shell_command: Option<ShellCommand>,
     pub use_difft: bool,
+    /// When set (via --open-out), Enter writes the selected file's absolute
+    /// path here and quits, so a wrapping editor can pick it up.
+    pub open_out: Option<PathBuf>,
 }
 
 impl App {
-    pub fn new(repo_root: PathBuf, comments: Comments, use_difft: bool) -> Result<Self> {
+    pub fn new(
+        repo_root: PathBuf,
+        comments: Comments,
+        use_difft: bool,
+        open_out: Option<PathBuf>,
+    ) -> Result<Self> {
         let files = git::collect_changed_files(&repo_root)?;
         let tree = tree::build_tree(&files);
         let tree_rows = tree::flatten_tree(&tree, &files);
@@ -81,6 +89,7 @@ impl App {
             should_quit: false,
             shell_command: None,
             use_difft,
+            open_out,
         };
 
         if !app.files.is_empty() {
@@ -241,6 +250,7 @@ impl App {
             Action::PrevChange => self.jump_prev_change(),
             Action::CheckoutFile => self.checkout_selected(),
             Action::DeleteFile => self.delete_selected(),
+            Action::OpenFile => self.open_selected()?,
             Action::ConfirmYes => {}
             Action::ShowHelp => self.show_help = true,
             Action::CloseOverlay => {}
@@ -249,6 +259,26 @@ impl App {
             Action::PrefixG => {}
         }
         self.clamp_scroll();
+        Ok(())
+    }
+
+    /// Hand the selected file off to a wrapping editor: write its absolute
+    /// path to the --open-out file and quit. No-op without --open-out, on a
+    /// directory row, or when the file no longer exists on disk (deleted).
+    fn open_selected(&mut self) -> Result<()> {
+        let Some(out) = self.open_out.clone() else {
+            return Ok(());
+        };
+        let Some(idx) = self.selected_file_idx() else {
+            return Ok(());
+        };
+        if let Some(file) = self.files.get(idx) {
+            let full_path = self.repo_root.join(&file.path);
+            if full_path.is_file() {
+                std::fs::write(&out, full_path.to_string_lossy().as_bytes())?;
+                self.should_quit = true;
+            }
+        }
         Ok(())
     }
 
@@ -739,7 +769,70 @@ mod tests {
             should_quit: false,
             shell_command: None,
             use_difft: false,
+            open_out: None,
         }
+    }
+
+    fn file_row(label: &str, idx: usize) -> crate::model::TreeRow {
+        crate::model::TreeRow {
+            depth: 0,
+            label: label.to_string(),
+            is_dir: false,
+            file_index: Some(idx),
+            file_indices: vec![idx],
+        }
+    }
+
+    #[test]
+    fn enter_without_open_out_is_noop() {
+        let mut app = app_for_test();
+        app.files = vec![changed_file("a.txt")];
+        app.tree_rows = vec![file_row("a.txt", 0)];
+
+        app.on_action(Action::OpenFile).unwrap();
+
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn enter_writes_selected_path_and_quits() {
+        let dir = std::env::temp_dir().join(format!("fdf-open-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let tracked = dir.join("a.txt");
+        std::fs::write(&tracked, "hello").unwrap();
+        let out = dir.join("open-out");
+
+        let mut app = app_for_test();
+        app.repo_root = dir.clone();
+        app.open_out = Some(out.clone());
+        app.files = vec![changed_file("a.txt")];
+        app.tree_rows = vec![file_row("a.txt", 0)];
+
+        app.on_action(Action::OpenFile).unwrap();
+
+        assert!(app.should_quit);
+        let written = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(written, tracked.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn enter_on_deleted_file_is_noop() {
+        let dir = std::env::temp_dir().join(format!("fdf-open-del-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("open-out");
+
+        let mut app = app_for_test();
+        app.repo_root = dir.clone();
+        app.open_out = Some(out.clone());
+        app.files = vec![changed_file("gone.txt")];
+        app.tree_rows = vec![file_row("gone.txt", 0)];
+
+        app.on_action(Action::OpenFile).unwrap();
+
+        assert!(!app.should_quit);
+        assert!(!out.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn changed_file(path: &str) -> ChangedFile {

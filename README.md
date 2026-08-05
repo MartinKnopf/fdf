@@ -32,6 +32,7 @@
 | `g g` | Go to top |
 | `G` | Go to bottom |
 | `n` / `N` | Next / previous change |
+| `Enter` | Open selected file in wrapping editor (requires `--open-out`) |
 | `Space` | Stage / unstage selected file |
 | `!` | Checkout file (discard changes, confirm with `y`) |
 | `d` | Delete file (confirm with `y`) |
@@ -44,6 +45,18 @@
 | `?` | Show keybindings help |
 | `Esc` | Close help overlay |
 | `q` | Quit |
+
+## Editor Integration
+Pass `-o/--open-out <path>` to enable the `Enter` keybinding: fdf writes the
+selected file's absolute path to `<path>` and quits, letting a wrapping editor
+open the file. Example (Neovim floating terminal):
+
+```lua
+local handoff = vim.fn.tempname()
+-- run: fdf --open-out <handoff>; after the process exits:
+local path = vim.fn.filereadable(handoff) == 1 and vim.fn.readfile(handoff)[1] or nil
+if path then vim.cmd("edit " .. vim.fn.fnameescape(path)) end
+```
 
 ## High-Level Architecture
 The app has a small modular architecture:

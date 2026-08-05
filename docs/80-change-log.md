@@ -1,10 +1,15 @@
-Last Updated: 2026-02-23
+Last Updated: 2026-08-05
 Status: active
 Audience: both
 Update Trigger: Meaningful behavior/reliability/security/release change
 Source of Truth: PRs, release tags
 
 # Change Log
+
+## 2026-08-05
+- Change: Added `-o/--open-out <path>` flag and `Enter` keybinding for editor hand-off. With the flag set, Enter writes the selected file's absolute path to `<path>` and quits; without it Enter is a no-op. Directory rows and files missing from the worktree (deleted) are ignored.
+- Impact: A wrapping editor (e.g. Neovim floating terminal) can read the hand-off file after fdf exits and open the selected file. Enables the Neovim integration: Enter in fdf opens the file with the gitchange inline diff enabled.
+- References: src/input.rs, src/app.rs, src/main.rs, src/ui.rs, README.md
 
 ## 2026-02-23
 - Change: File selection (`Shift+J`/`Shift+K`) wraps around at boundaries and short-circuits when selection is unchanged.

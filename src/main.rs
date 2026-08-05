@@ -26,7 +26,7 @@ use crate::comments::Comments;
 use crate::input::map_key;
 
 fn main() -> Result<()> {
-    let (comments_path, use_difft, syntax_theme) = parse_args()?;
+    let (comments_path, use_difft, syntax_theme, open_out) = parse_args()?;
 
     if let Some(ref theme) = syntax_theme {
         ui::set_syntax_theme(theme).map_err(|e| anyhow::anyhow!(e))?;
@@ -38,7 +38,7 @@ fn main() -> Result<()> {
     };
 
     let repo_root = git::repo_root()?;
-    let mut app = App::new(repo_root, comments, use_difft)?;
+    let mut app = App::new(repo_root, comments, use_difft, open_out)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -55,11 +55,12 @@ fn main() -> Result<()> {
     run_result
 }
 
-fn parse_args() -> Result<(Option<PathBuf>, bool, Option<String>)> {
+fn parse_args() -> Result<(Option<PathBuf>, bool, Option<String>, Option<PathBuf>)> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut comments_path: Option<PathBuf> = None;
     let mut use_difft = false;
     let mut syntax_theme: Option<String> = None;
+    let mut open_out: Option<PathBuf> = None;
     let mut i = 0;
 
     while i < args.len() {
@@ -78,6 +79,13 @@ fn parse_args() -> Result<(Option<PathBuf>, bool, Option<String>)> {
             "-d" | "--use-difft" => {
                 use_difft = true;
             }
+            "-o" | "--open-out" => {
+                i += 1;
+                if i >= args.len() {
+                    bail!("Missing path argument for -o/--open-out");
+                }
+                open_out = Some(PathBuf::from(&args[i]));
+            }
             "-s" | "--syntax-theme" => {
                 i += 1;
                 if i >= args.len() {
@@ -92,7 +100,7 @@ fn parse_args() -> Result<(Option<PathBuf>, bool, Option<String>)> {
         i += 1;
     }
 
-    Ok((comments_path, use_difft, syntax_theme))
+    Ok((comments_path, use_difft, syntax_theme, open_out))
 }
 
 fn print_help() {
@@ -114,6 +122,9 @@ OPTIONS
                             base16-ocean.dark (default), base16-ocean.light,
                             Dracula, InspiredGitHub, Solarized (dark),
                             Solarized (light)
+    -o, --open-out <path>   Write the selected file's absolute path to <path>
+                            when Enter is pressed, then quit. Lets a wrapping
+                            editor (e.g. Neovim) open the file afterwards.
     -h, --help              Print this help message and exit
 
 KEYBINDINGS
@@ -124,6 +135,7 @@ KEYBINDINGS
     Ctrl-d / Ctrl-u Page down / up
     n / N           Jump to next / previous change block
     g g / G         Jump to top / bottom
+    Enter           Open selected file in wrapping editor (requires --open-out)
     Space           Stage / unstage selected file
     A               Stage / unstage all changes
     !               Checkout file (discard changes, y to confirm)

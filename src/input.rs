@@ -27,6 +27,7 @@ pub enum Action {
     GitPush,
     CheckoutFile,
     DeleteFile,
+    OpenFile,
     ConfirmYes,
     ShowHelp,
     CloseOverlay,
@@ -68,6 +69,7 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Char('!') => Action::CheckoutFile,
         KeyCode::Char('d') => Action::DeleteFile,
         KeyCode::Char('y') => Action::ConfirmYes,
+        KeyCode::Enter => Action::OpenFile,
         KeyCode::Char('?') => Action::ShowHelp,
         KeyCode::Up => Action::ScrollUp,
         KeyCode::Down => Action::ScrollDown,
@@ -100,6 +102,12 @@ mod tests {
     fn maps_shift_r_to_refresh() {
         let action = map_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
         assert!(matches!(action, Action::Refresh));
+    }
+
+    #[test]
+    fn maps_enter_to_open_file() {
+        let action = map_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(action, Action::OpenFile));
     }
 
     #[test]
